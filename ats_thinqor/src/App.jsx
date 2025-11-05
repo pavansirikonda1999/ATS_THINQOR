@@ -9,6 +9,7 @@ import CreateRequirements from "./components/CreateRequirements";
 import DmDashboard from "./components/DmDashboard";
 import Requirements from "./components/Requirements";
 import Clients from "./components/Clients";
+import FloatingAiChat from "./components/FloatingAiChat";
 
 export default function App() {
   return (
@@ -35,6 +36,9 @@ export default function App() {
         <Route path="/requirements" element={<Requirements />} />
         <Route path="/reports" element={<Reports />} /> */}
       </Routes>
+
+      {/* 🤖 AI Chat - Floating button on all pages (only visible when logged in) */}
+      <FloatingAiChat />
     </>
   );
 }

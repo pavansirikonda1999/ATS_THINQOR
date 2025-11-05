@@ -4,20 +4,44 @@ from mysql.connector import Error
 from flask_cors import CORS
 import uuid
 import os
+from pathlib import Path
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
 
 
 app = Flask(__name__)
 CORS(app)
 
 # -------------------------------------
+# Environment loading (.env preferred; fallback to config.env for local dev)
+# -------------------------------------
+if load_dotenv:
+    # Try .env first, then fallback to config.env
+    env_file = Path(__file__).parent / ".env"
+    if not env_file.exists():
+        env_file = Path(__file__).parent / "config.env"
+    if env_file.exists():
+        load_dotenv(dotenv_path=env_file, override=True)
+        print(f"✅ Loaded environment from: {env_file.name}")
+    else:
+        print("⚠️ No .env or config.env found, using defaults")
+else:
+    print("⚠️ python-dotenv not installed, using system environment variables")
+
+# -------------------------------------
 # Database connection configuration
 # -------------------------------------
 db_config = {
-    'host': os.environ.get('DB_HOST', 'localhost'),
-    'user': os.environ.get('DB_USER', 'root'),
-    'password': os.environ.get('DB_PASSWORD', '5757'),
-    'database': os.environ.get('DB_NAME', 'ats_system')
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', ''),
+    'database': os.getenv('DB_NAME', 'ats_system')
 }
+
+# Debug: Print DB config (mask password for security)
+print(f"🔧 DB Config: host={db_config['host']}, user={db_config['user']}, database={db_config['database']}, password={'***' if db_config['password'] else '(empty)'}")
 
 # -------------------------------------
 # Create a reusable connection function
@@ -39,36 +63,21 @@ def get_db_connection():
 def home():
     return 'ATS Backend is Running! 🚀'
 
-@app.route('/healthz')
-def healthz():
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"status": "down", "db": False}), 503
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        cursor.fetchone()
-        cursor.close()
-        conn.close()
-        return jsonify({"status": "ok", "db": True}), 200
-    except Exception as e:
-        return jsonify({"status": "down", "db": False, "error": str(e)}), 503
-
-@app.route('/testdb')
-def test_db():
-    try:
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute("SHOW DATABASES;")
-            databases = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            return jsonify({"message": "Connected", "databases": databases}), 200
-        else:
-            return jsonify({"message": "Failed to connect to database"}), 503
-    except Exception as e:
-        return jsonify({"message": "Error", "error": str(e)}), 500
+# @app.route('/testdb')
+# def test_db():
+#     try:
+#         conn = get_db_connection()
+#         if conn:
+#             cursor = conn.cursor()
+#             cursor.execute("SHOW DATABASES;")
+#             databases = cursor.fetchall()
+#             cursor.close()
+#             conn.close()
+#             return f"✅ Connected Successfully! Databases: {databases}"
+#         else:
+#             return "❌ Failed to connect to database."
+#     except Exception as e:
+#         return f"❌ Error: {str(e)}"
 
 import hashlib
 
@@ -169,8 +178,6 @@ def login():
         hashed_pw = hashlib.sha256(password.encode()).hexdigest()
 
         conn = get_db_connection()
-        if conn is None:
-            return jsonify({"message": "❌ Database unavailable. Check connection settings."}), 503
         cursor = conn.cursor(dictionary=True)
 
         # Search in 'users' table (registered users)
@@ -375,5 +382,9 @@ def get_clients():
 # Run Server
 # -------------------------------------
 if __name__ == '__main__':
+    # Import AI routes after env loading (to avoid circular import issues)
+    from controllers.ai_chat_controller import register_ai_routes
     ensure_admin_exists()
+    # Register AI assistant routes without altering existing endpoints
+    register_ai_routes(app)
     app.run(debug=True)
