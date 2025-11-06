@@ -11,6 +11,12 @@ from services.ai_data_service import (
 	list_requirements_for_client,
 	get_client_by_id_for_user,
 	get_allocations_for_requirement,
+    list_users_for_admin,
+    list_recruiters_for_user,
+    get_recruiter_by_query,
+    list_clients_for_user,
+    list_requirements_for_admin,
+    list_candidates_for_user,
 )
 
 
@@ -19,12 +25,11 @@ ai_bp = Blueprint("ai", __name__, url_prefix="/api/ai")
 
 SYSTEM_PROMPT = (
 	"You are an ATS assistant. Answer ONLY from the CONTEXT. The current database "
-	"contains: requirements, requirement_allocations, clients, users. It does NOT contain "
-	"candidate or interview tables. If the user asks for candidates or interviews, clearly say that the "
-	"current ATS database doesn’t have those tables and offer requirement/client/allocation info instead. "
-	"Obey role rules: admin can access everything; recruiter may access requirements allocated to them; "
-	"client may only access requirements where client_id matches their id. Never invent data. If a record or "
-	"access is missing, say so directly and propose related information available (e.g., requirement details, client data, allocations)."
+	"contains: requirements, requirement_allocations, clients, users, and candidates. "
+	"Obey role rules: admin and delivery manager can access everything including candidates; "
+	"recruiter may access requirements allocated to them; client may only access requirements where client_id matches their id. "
+	"Never invent data. If a record or access is missing, say so directly and propose related information available "
+	"(e.g., requirement details, client data, allocations, candidates)."
 )
 
 
@@ -33,8 +38,12 @@ def _detect_intent(message: str) -> str:
 	ml = (message or "").lower()
 	if any(k in ml for k in ["requirement", "opening", "req ", "req-", "r-"]):
 		return "requirement"
-	if "client" in ml:
+	if "client" in ml or "clients" in ml:
 		return "client"
+	if any(k in ml for k in ["candidate", "candidates", "applicant", "applicants"]):
+		return "candidates"
+	if any(k in ml for k in ["recruiter", "recruiters", "users", "user list", "team"]):
+		return "users"
 	if any(k in ml for k in ["my allocations", "my requirements", "allocated", "assigned to me", "recruiter"]):
 		return "allocations"
 	return "general"
@@ -72,6 +81,9 @@ def chat() -> Any:
 			context["requirement"] = get_requirement_by_id_for_user(req_id, user) if req_id else None
 			if req_id:
 				context["allocations"] = get_allocations_for_requirement(req_id)
+			# For admins, if no specific requirement id, include full list
+			if not req_id and (user.get("role", "").upper() == "ADMIN"):
+				context["requirements"] = list_requirements_for_admin()
 
 		elif intent == "client":
 			# extract numeric/id after 'client'
@@ -81,10 +93,14 @@ def chat() -> Any:
 				idx = [p.lower() for p in parts].index("client")
 				if idx + 1 < len(parts):
 					client_id = parts[idx + 1]
+			# Specific client details
 			context["client"] = get_client_by_id_for_user(client_id, user) if client_id else None
-			# also include this client's requirements for convenience
+			# Also include this client's requirements for convenience
 			if context.get("client"):
 				context["requirements"] = list_requirements_for_client(client_id)
+			# Generic client listing
+			if any(k in (message.lower()) for k in ["clients", "all clients", "list clients", "get clients"]) and not context.get("client"):
+				context["clients"] = list_clients_for_user(user)
 
 		elif intent == "allocations":
 			# recruiter scope
@@ -92,6 +108,34 @@ def chat() -> Any:
 				context["requirements"] = list_requirements_for_recruiter(user.get("id"))
 			else:
 				context["requirements"] = []
+
+		elif intent == "candidates":
+			# Fetch candidates list for admin and delivery manager
+			context["candidates"] = list_candidates_for_user(user)
+			# Also try to extract candidate name if mentioned
+			ml = message.lower()
+			for word in message.split():
+				if len(word) > 2:  # Skip very short words
+					candidate = get_candidate_by_name_for_user(word, user)
+					if candidate:
+						context["candidate"] = candidate
+						break
+
+		elif intent == "users":
+			# If admin wants users/recruiters, include list; else scope appropriately
+			role = (user.get("role") or "").upper()
+			if role == "ADMIN":
+				context["users"] = list_users_for_admin()
+			else:
+				context["recruiters"] = list_recruiters_for_user(user)
+
+		# If admin or delivery manager with a general question, provide broad context to answer freely
+		if (user.get("role", "").upper() in ["ADMIN", "DELIVERY_MANAGER"]) and intent == "general":
+			# Load key datasets so LLM can answer "anything" within ATS
+			context["clients"] = context.get("clients") or list_clients_for_user(user)
+			context["users"] = context.get("users") or list_users_for_admin()
+			context["requirements"] = context.get("requirements") or list_requirements_for_admin()
+			context["candidates"] = context.get("candidates") or list_candidates_for_user(user)
 
 		# 4) Call LLM with system prompt, original question, and structured context
 		answer = call_llm(SYSTEM_PROMPT, context, message)

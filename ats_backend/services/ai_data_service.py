@@ -86,14 +86,37 @@ def _is_client(user: UserDict) -> bool:
 
 def get_candidate_by_name_for_user(name: str, user: UserDict) -> Optional[Dict[str, Any]]:
 
-	# Current schema has no candidates table; return None safely
-	return None
+	# Only ADMIN and DELIVERY_MANAGER can access candidates
+	if not (_is_admin(user) or (user or {}).get("role", "").upper() == "DELIVERY_MANAGER"):
+		return None
+	
+	q = f"%{name}%"
+	return _fetch_one(
+		"SELECT id, name, email, phone, skills, education, experience, resume_filename FROM candidates WHERE name LIKE %s OR email LIKE %s LIMIT 1",
+		(q, q),
+	)
 
 
 def get_candidate_track_for_user(candidate_id: str, user: UserDict) -> List[Dict[str, Any]]:
 
 	# Current schema has no candidate_track table; return empty safely
 	return []
+
+
+def list_candidates_for_user(user: UserDict) -> List[Dict[str, Any]]:
+
+	# Only ADMIN and DELIVERY_MANAGER can access candidates
+	if not (_is_admin(user) or (user or {}).get("role", "").upper() == "DELIVERY_MANAGER"):
+		return []
+	
+	return _fetch_all(
+		"""
+		SELECT id, name, email, phone, skills, education, experience, resume_filename
+		FROM candidates
+		ORDER BY id DESC
+		""",
+		(),
+	)
 
 
 def get_requirement_for_user(requirement_id: str, user: UserDict) -> Optional[Dict[str, Any]]:
@@ -197,6 +220,19 @@ def list_requirements_for_client(client_id: str) -> List[Dict[str, Any]]:
 	)
 
 
+def list_requirements_for_admin() -> List[Dict[str, Any]]:
+
+	return _fetch_all(
+		"""
+		SELECT r.id, r.title, r.location, r.status, c.name AS client_name
+		FROM requirements r
+		LEFT JOIN clients c ON c.id = r.client_id
+		ORDER BY r.created_at DESC
+		""",
+		(),
+	)
+
+
 def get_client_by_id_for_user(client_id: str, user: UserDict) -> Optional[Dict[str, Any]]:
 
 	if _is_admin(user):
@@ -234,6 +270,133 @@ def get_allocations_for_requirement(requirement_id: str) -> List[Dict[str, Any]]
 		""",
 		(requirement_id,),
 	)
+
+
+def list_clients_for_user(user: UserDict) -> List[Dict[str, Any]]:
+
+	# Admin → all clients with all safe fields
+	if _is_admin(user):
+		return _fetch_all(
+			"""
+			SELECT id, name, contact_person, email, phone, address, status, created_at
+			FROM clients
+			ORDER BY created_at DESC
+			""",
+			(),
+		)
+
+	# Recruiter/Client → only ACTIVE clients (adjust as needed)
+	return _fetch_all(
+		"""
+		SELECT id, name, contact_person, email, phone, address, status, created_at
+		FROM clients
+		WHERE status = 'ACTIVE'
+		ORDER BY created_at DESC
+		""",
+		(),
+	)
+
+
+def list_users_for_admin() -> List[Dict[str, Any]]:
+
+	# Admin view of users
+	return _fetch_all(
+		"""
+		SELECT id, name, email, role, phone, status, created_at
+		FROM users
+		ORDER BY created_at DESC
+		""",
+		(),
+	)
+
+
+def list_recruiters_for_user(user: UserDict) -> List[Dict[str, Any]]:
+
+	# Admin: all recruiters
+	if _is_admin(user):
+		return _fetch_all(
+			"SELECT id, name, email, phone, status FROM users WHERE role = 'RECRUITER' ORDER BY created_at DESC",
+			(),
+		)
+
+	# Recruiter: at least themselves; optionally peers allocated on same requirements
+	if _is_recruiter(user):
+		# Return self and any recruiters allocated to same requirements as the user
+		return _fetch_all(
+			"""
+			SELECT DISTINCT u.id, u.name, u.email, u.phone, u.status
+			FROM users u
+			WHERE u.role = 'RECRUITER' AND (
+				u.id = %s OR u.id IN (
+					SELECT ra2.recruiter_id
+					FROM requirement_allocations ra1
+					JOIN requirement_allocations ra2 ON ra1.requirement_id = ra2.requirement_id
+					WHERE ra1.recruiter_id = %s
+				)
+			)
+			ORDER BY u.created_at DESC
+			""",
+			(user.get("id"), user.get("id")),
+		)
+
+	# Client: recruiters allocated to their requirements
+	if _is_client(user):
+		return _fetch_all(
+			"""
+			SELECT DISTINCT u.id, u.name, u.email, u.phone, u.status
+			FROM users u
+			JOIN requirement_allocations ra ON ra.recruiter_id = u.id
+			JOIN requirements r ON r.id = ra.requirement_id
+			WHERE u.role = 'RECRUITER' AND r.client_id = %s
+			ORDER BY u.created_at DESC
+			""",
+			(user.get("client_id"),),
+		)
+
+	return []
+
+
+def get_recruiter_by_query(query_text: str, user: UserDict) -> Optional[Dict[str, Any]]:
+
+	q = f"%{query_text}%"
+
+	if _is_admin(user):
+		return _fetch_one(
+			"SELECT id, name, email, phone, status FROM users WHERE role = 'RECRUITER' AND (id = %s OR name LIKE %s OR email LIKE %s) ORDER BY created_at DESC LIMIT 1",
+			(query_text, q, q),
+		)
+
+	if _is_recruiter(user):
+		# Can view self or peers on same requirements
+		return _fetch_one(
+			"""
+			SELECT DISTINCT u.id, u.name, u.email, u.phone, u.status
+			FROM users u
+			LEFT JOIN requirement_allocations ra1 ON ra1.recruiter_id = u.id
+			LEFT JOIN requirement_allocations ra2 ON ra2.requirement_id = ra1.requirement_id
+			WHERE u.role = 'RECRUITER'
+			AND (u.id = %s OR u.id = %s OR u.name LIKE %s OR u.email LIKE %s)
+			AND (u.id = %s OR ra2.recruiter_id = %s)
+			ORDER BY u.created_at DESC LIMIT 1
+			""",
+			(query_text, user.get("id"), q, q, user.get("id"), user.get("id")),
+		)
+
+	if _is_client(user):
+		# Client can view recruiters allocated to their requirements
+		return _fetch_one(
+			"""
+			SELECT DISTINCT u.id, u.name, u.email, u.phone, u.status
+			FROM users u
+			JOIN requirement_allocations ra ON ra.recruiter_id = u.id
+			JOIN requirements r ON r.id = ra.requirement_id
+			WHERE u.role = 'RECRUITER' AND r.client_id = %s AND (u.id = %s OR u.name LIKE %s OR u.email LIKE %s)
+			ORDER BY u.created_at DESC LIMIT 1
+			""",
+			(user.get("client_id"), query_text, q, q),
+		)
+
+	return None
 
 
 def get_client_for_user(client_id: str, user: UserDict) -> Optional[Dict[str, Any]]:

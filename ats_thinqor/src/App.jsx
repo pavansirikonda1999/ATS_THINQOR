@@ -9,6 +9,7 @@ import CreateRequirements from "./components/CreateRequirements";
 import DmDashboard from "./components/DmDashboard";
 import Requirements from "./components/Requirements";
 import Clients from "./components/Clients";
+import CandidateApplicationUI from "./components/Candidates";
 import FloatingAiChat from "./components/FloatingAiChat";
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/create-requirement" element={<CreateRequirements/>}/>
         <Route path="/requirements" element={<Requirements />} />
         <Route path="/clients" element={<Clients />} />
+        <Route path="/candidates" element={<CandidateApplicationUI />} />
 
 
 

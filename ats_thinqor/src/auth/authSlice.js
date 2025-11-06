@@ -1,4 +1,6 @@
 // src/features/auth/authSlice.jsx
+// This slice manages authentication, users, requirements, clients, and candidates
+// All API calls should go through Redux thunks defined here, not direct fetch/axios calls
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import axios from "axios";
 
@@ -175,6 +177,92 @@ export const fetchClients = createAsyncThunk(
   }
 );
 
+// ------------------------------------------------------------------
+// FETCH CANDIDATES
+// ------------------------------------------------------------------
+export const fetchCandidates = createAsyncThunk(
+  "candidates/fetchCandidates",
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await axios.get(`${API_URL}/get-candidates`);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "Failed to fetch candidates"
+      );
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// SUBMIT CANDIDATE (Create new candidate)
+// ------------------------------------------------------------------
+export const submitCandidate = createAsyncThunk(
+  "candidates/submitCandidate",
+  async (candidateData, { rejectWithValue }) => {
+    try {
+      const formData = new FormData();
+      Object.entries(candidateData).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          formData.append(key, value);
+        }
+      });
+      
+      const response = await axios.post(`${API_URL}/submit-candidate`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "Failed to submit candidate"
+      );
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// UPDATE CANDIDATE
+// ------------------------------------------------------------------
+export const updateCandidate = createAsyncThunk(
+  "candidates/updateCandidate",
+  async ({ id, candidateData }, { rejectWithValue }) => {
+    try {
+      const formData = new FormData();
+      Object.entries(candidateData).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          formData.append(key, value);
+        }
+      });
+      
+      const response = await axios.put(`${API_URL}/update-candidate/${id}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "Failed to update candidate"
+      );
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// DELETE CANDIDATE
+// ------------------------------------------------------------------
+export const deleteCandidate = createAsyncThunk(
+  "candidates/deleteCandidate",
+  async (id, { rejectWithValue }) => {
+    try {
+      const response = await axios.delete(`${API_URL}/delete-candidate/${id}`);
+      return { id, message: response.data.message };
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "Failed to delete candidate"
+      );
+    }
+  }
+);
+
 
 // ------------------------------------------------------------------
 // INITIAL STATE
@@ -184,6 +272,7 @@ const initialState = {
   usersList: [], // For admin getUsers
   requirements: [],
   clients: [],
+  candidates: [], // For candidates list
   loading: false,
   error: null,
   successMessage: null,
@@ -296,7 +385,52 @@ const authSlice = createSlice({
 
     .addCase(assignRequirement.pending, (s) => { s.loading = true; })
     .addCase(assignRequirement.fulfilled, (s) => { s.loading = false; s.successMessage = "Requirement assigned"; })
-    .addCase(assignRequirement.rejected, (s, a) => { s.loading = false; s.error = a.payload; });
+    .addCase(assignRequirement.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
+
+    // FETCH CANDIDATES
+    .addCase(fetchCandidates.pending, (s) => { s.loading = true; s.error = null; })
+    .addCase(fetchCandidates.fulfilled, (s, a) => {
+      s.loading = false;
+      s.candidates = a.payload;
+    })
+    .addCase(fetchCandidates.rejected, (s, a) => {
+      s.loading = false;
+      s.error = a.payload;
+    })
+
+    // SUBMIT CANDIDATE
+    .addCase(submitCandidate.pending, (s) => { s.loading = true; s.error = null; })
+    .addCase(submitCandidate.fulfilled, (s, a) => {
+      s.loading = false;
+      s.successMessage = a.payload.message || "Candidate submitted successfully!";
+    })
+    .addCase(submitCandidate.rejected, (s, a) => {
+      s.loading = false;
+      s.error = a.payload;
+    })
+
+    // UPDATE CANDIDATE
+    .addCase(updateCandidate.pending, (s) => { s.loading = true; s.error = null; })
+    .addCase(updateCandidate.fulfilled, (s, a) => {
+      s.loading = false;
+      s.successMessage = a.payload.message || "Candidate updated successfully!";
+    })
+    .addCase(updateCandidate.rejected, (s, a) => {
+      s.loading = false;
+      s.error = a.payload;
+    })
+
+    // DELETE CANDIDATE
+    .addCase(deleteCandidate.pending, (s) => { s.loading = true; s.error = null; })
+    .addCase(deleteCandidate.fulfilled, (s, a) => {
+      s.loading = false;
+      s.candidates = s.candidates.filter(c => c.id !== a.payload.id);
+      s.successMessage = a.payload.message || "Candidate deleted successfully!";
+    })
+    .addCase(deleteCandidate.rejected, (s, a) => {
+      s.loading = false;
+      s.error = a.payload;
+    });
   },
 });
 

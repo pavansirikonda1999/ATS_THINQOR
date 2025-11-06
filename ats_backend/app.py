@@ -5,6 +5,7 @@ from flask_cors import CORS
 import uuid
 import os
 from pathlib import Path
+from werkzeug.utils import secure_filename
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -42,6 +43,14 @@ db_config = {
 
 # Debug: Print DB config (mask password for security)
 print(f"🔧 DB Config: host={db_config['host']}, user={db_config['user']}, database={db_config['database']}, password={'***' if db_config['password'] else '(empty)'}")
+
+
+app.config["UPLOAD_FOLDER"] = "./uploads/resumes"
+os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+ALLOWED_EXTENSIONS = {"pdf", "doc", "docx"}
+
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # -------------------------------------
 # Create a reusable connection function
@@ -111,6 +120,132 @@ def ensure_admin_exists():
     except Exception as e:
         print("❌ Error ensuring admin:", e)
 
+
+@app.route("/submit-candidate", methods=["POST"])
+def submit_candidate():
+    try:
+        # ------------------- Form Data -------------------
+        name = request.form.get("name")
+        email = request.form.get("email")
+        phone = request.form.get("phone")
+        skills = request.form.get("skills")
+        education = request.form.get("education")
+        experience = request.form.get("experience")
+        resume = request.files.get("resume")  # file
+
+        if not all([name, email]):
+            return jsonify({"message": "Name and email are required"}), 400
+
+        # ------------------- Resume Upload -------------------
+        filename = None
+        if resume and allowed_file(resume.filename):
+            filename = secure_filename(resume.filename)
+            resume.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+        elif resume:
+            return jsonify({"message": "Invalid file type"}), 400
+
+        # ------------------- Insert into DB -------------------
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"message": "Database connection failed"}), 500
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO candidates
+            (name, email, phone, skills, education, experience, resume_filename)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+        """, (name, email, phone, skills, education, experience, filename))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": f"✅ Candidate '{name}' submitted successfully!"}), 201
+
+    except Exception as e:
+        print(e)
+        return jsonify({"message": "❌ Error submitting candidate", "error": str(e)}), 500
+
+@app.route("/get-candidates", methods=["GET"])
+def get_candidates():
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"message": "Database connection failed"}), 500
+
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
+        candidates = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify(candidates), 200
+    except Exception as e:
+        print(e)
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route("/update-candidate/<int:id>", methods=["PUT"])
+def update_candidate(id):
+    try:
+        name = request.form.get("name")
+        email = request.form.get("email")
+        phone = request.form.get("phone")
+        skills = request.form.get("skills")
+        education = request.form.get("education")
+        experience = request.form.get("experience")
+        resume = request.files.get("resume")
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"message": "Database connection failed"}), 500
+
+        cursor = conn.cursor()
+
+        if resume and allowed_file(resume.filename):
+            filename = secure_filename(resume.filename)
+            resume.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+            cursor.execute("""
+                UPDATE candidates 
+                SET name=%s, email=%s, phone=%s, skills=%s, education=%s, experience=%s, resume_filename=%s
+                WHERE id=%s
+            """, (name, email, phone, skills, education, experience, filename, id))
+        else:
+            cursor.execute("""
+                UPDATE candidates 
+                SET name=%s, email=%s, phone=%s, skills=%s, education=%s, experience=%s
+                WHERE id=%s
+            """, (name, email, phone, skills, education, experience, id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": "✅ Candidate updated successfully!"}), 200
+    except Exception as e:
+        print(e)
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route("/delete-candidate/<int:id>", methods=["DELETE"])
+def delete_candidate(id):
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"message": "Database connection failed"}), 500
+
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM candidates WHERE id=%s", (id,))
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": "🗑 Candidate deleted successfully!"}), 200
+    except Exception as e:
+        print(e)
+        return jsonify({"message": str(e)}), 500
 
 @app.route('/create-user', methods=['POST'])
 def create_user():
