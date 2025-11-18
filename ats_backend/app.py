@@ -42,8 +42,133 @@ db_config = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'user': os.getenv('DB_USER', 'root'),
     'password': os.getenv('DB_PASSWORD', ''),
-    'database': os.getenv('DB_NAME', 'ats_system')
+    'database': os.getenv('DB_NAME', 'ats')
 }
+
+def initialize_database():
+    """Create tables if they do not exist."""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            print("❌ DB connection failed")
+            return
+
+        cursor = conn.cursor()
+
+        # ---------------------------
+        # USERS TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                email VARCHAR(150) NOT NULL UNIQUE,
+                password_hash VARCHAR(255) NOT NULL,
+                role ENUM('ADMIN','DELIVERY_MANAGER','TEAM_LEAD','RECRUITER','CLIENT','CANDIDATE') DEFAULT 'RECRUITER',
+                phone VARCHAR(20),
+                status VARCHAR(20) DEFAULT 'ACTIVE',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # ---------------------------
+        # USERSDATA TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usersdata (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100),
+                email VARCHAR(150) UNIQUE,
+                phone VARCHAR(20),
+                role VARCHAR(50),
+                status VARCHAR(20) DEFAULT 'ACTIVE',
+                password_hash VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # ---------------------------
+        # CLIENTS TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS clients (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                contact_person VARCHAR(255),
+                email VARCHAR(255),
+                phone VARCHAR(50),
+                address TEXT,
+                status ENUM('ACTIVE','INACTIVE') DEFAULT 'ACTIVE',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # ---------------------------
+        # REQUIREMENTS TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS requirements (
+                id VARCHAR(50) PRIMARY KEY,
+                client_id INT,
+                title VARCHAR(255),
+                description TEXT,
+                location VARCHAR(100),
+                skills_required VARCHAR(255),
+                experience_required FLOAT,
+                ctc_range VARCHAR(100),
+                ecto_range VARCHAR(100),
+                status VARCHAR(50) DEFAULT 'OPEN',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by VARCHAR(100),
+                FOREIGN KEY (client_id) REFERENCES clients(id)
+            );
+        """)
+
+        # ---------------------------
+        # REQUIREMENT_ALLOCATIONS
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS requirement_allocations (
+                id VARCHAR(50) PRIMARY KEY,
+                requirement_id VARCHAR(50),
+                recruiter_id INT,
+                assigned_by INT,
+                status VARCHAR(20) DEFAULT 'ASSIGNED',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (requirement_id) REFERENCES requirements(id),
+                FOREIGN KEY (recruiter_id) REFERENCES users(id),
+                FOREIGN KEY (assigned_by) REFERENCES users(id)
+            );
+        """)
+
+        # ---------------------------
+        # CANDIDATES TABLE
+        # ---------------------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidates (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255),
+                email VARCHAR(255),
+                phone VARCHAR(20),
+                skills TEXT,
+                education TEXT,
+                experience TEXT,
+                resume_filename VARCHAR(255),
+                created_by INT,
+                source VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(id)
+            );
+        """)
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print("✅ All required tables checked/created successfully")
+
+    except Exception as e:
+        print("❌ Error initializing DB:", e)
 
 # Debug: Print DB config (mask password for security)
 print(f"🔧 DB Config: host={db_config['host']}, user={db_config['user']}, database={db_config['database']}, password={'***' if db_config['password'] else '(empty)'}")
@@ -1435,6 +1560,7 @@ if __name__ == '__main__':
     # Import AI routes after env loading (to avoid circular import issues)
     from controllers.ai_chat_controller import register_ai_routes
     from controllers.ai_jd_controller import jd_bp
+    initialize_database()
     ensure_admin_exists()
     ensure_user_status_defaults()
     # Register AI assistant routes without altering existing endpoints
