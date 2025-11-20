@@ -116,7 +116,7 @@ def initialize_database():
                 skills_required VARCHAR(255),
                 experience_required FLOAT,
                 ctc_range VARCHAR(100),
-                ecto_range VARCHAR(100),
+
                 status VARCHAR(50) DEFAULT 'OPEN',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by VARCHAR(100),
@@ -163,6 +163,24 @@ def initialize_database():
             );
         """)
 
+         # ---------------- CANDIDATE SCREENING ----------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidate_screening (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                candidate_id INT,
+                requirement_id VARCHAR(64),
+                ai_score FLOAT,
+                ai_rationale TEXT,
+                recommend VARCHAR(32),
+                red_flags TEXT,
+                model_version VARCHAR(50),
+                status ENUM('PENDING','DONE','ERROR') DEFAULT 'PENDING',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+                FOREIGN KEY (requirement_id) REFERENCES requirements(id)
+            );
+        """)
+
         conn.commit()
         cursor.close()
         conn.close()
@@ -182,6 +200,29 @@ ALLOWED_EXTENSIONS = {"pdf", "doc", "docx"}
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+
+# --- ADD: Extract role ENUM values ---
+def get_allowed_roles():
+    import re
+    conn = get_db_connection()
+    if not conn:
+        return []
+    cursor = conn.cursor()
+    cursor.execute("SHOW COLUMNS FROM users LIKE 'role'")
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not row:
+        return []
+
+    # row[1] contains: "enum('ADMIN','RECRUITER',...)"
+    enum_type = row[1]
+    roles = re.findall(r"'(.*?)'", enum_type)
+    return roles
+
 
 # -------------------------------------
 # Create a reusable connection function
@@ -274,6 +315,21 @@ def ensure_user_status_defaults():
     except Exception as e:
         print("⚠️ Could not enforce user status defaults:", e)
 
+
+@app.route("/roles", methods=["GET"])
+def roles_endpoint():
+    """
+    Returns JSON: { "roles": ["ADMIN","RECRUITER", ...] }
+    Frontend should call this to populate role dropdowns dynamically.
+    """
+    try:
+        roles = get_allowed_roles()
+        return jsonify({"roles": roles}), 200
+    except Exception as e:
+        return jsonify({"roles": [], "error": str(e)}), 500
+
+
+
 @app.route("/submit-candidate", methods=["POST"])
 def submit_candidate():
     try:
@@ -284,8 +340,13 @@ def submit_candidate():
         skills = request.form.get("skills")
         education = request.form.get("education")
         experience = request.form.get("experience")
-        created_by = request.form.get("created_by", type=int)  # Get created_by from form
-        resume = request.files.get("resume")  # file
+        created_by = request.form.get("created_by", type=int)
+
+        # New fields
+        ctc = request.form.get("ctc")
+        ectc = request.form.get("ectc")
+
+        resume = request.files.get("resume")
 
         if not all([name, email]):
             return jsonify({"message": "Name and email are required"}), 400
@@ -304,19 +365,25 @@ def submit_candidate():
             return jsonify({"message": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        # Include created_by in INSERT if provided
+
+        # Insert WITH created_by
         if created_by:
             cursor.execute("""
                 INSERT INTO candidates
-                (name, email, phone, skills, education, experience, resume_filename, created_by)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (name, email, phone, skills, education, experience, filename, created_by))
+                (name, email, phone, skills, education, experience, resume_filename,
+                 created_by, ctc, ectc)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (name, email, phone, skills, education, experience,
+                  filename, created_by, ctc, ectc))
         else:
+            # Insert WITHOUT created_by
             cursor.execute("""
                 INSERT INTO candidates
-                (name, email, phone, skills, education, experience, resume_filename)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
-            """, (name, email, phone, skills, education, experience, filename))
+                (name, email, phone, skills, education, experience, resume_filename,
+                 ctc, ectc)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (name, email, phone, skills, education, experience,
+                  filename, ctc, ectc))
 
         conn.commit()
         cursor.close()
@@ -325,7 +392,7 @@ def submit_candidate():
         return jsonify({"message": f"✅ Candidate '{name}' submitted successfully!"}), 201
 
     except Exception as e:
-        print(e)
+        print("❌ Error:", e)
         return jsonify({"message": "❌ Error submitting candidate", "error": str(e)}), 500
 
 @app.route("/get-candidates", methods=["GET"])
@@ -334,23 +401,19 @@ def get_candidates():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # ------------------------------------------------
         # 1️⃣ Ensure correct database
-        # ------------------------------------------------
         cursor.execute("SELECT DATABASE()")
         db_row = cursor.fetchone()
         print("🟢 Current DB check:", db_row)
 
         db_name = db_row.get("DATABASE()") if db_row else None
 
-        if not db_name or db_name.lower() != "ats_system":
-            print("⚠ Switching to ats_system database...")
-            cursor.execute("USE ats_system")
+        if not db_name or db_name.lower() != "ats":
+            print("⚠ Switching to ats database...")
+            cursor.execute("USE ats")
             conn.commit()
 
-        # ------------------------------------------------
-        # 2️⃣ Create table if it does NOT exist
-        # ------------------------------------------------
+        # 2️⃣ Create table if it doesn't exist
         cursor.execute("SHOW TABLES LIKE 'candidates'")
         if not cursor.fetchone():
             print("⚠ 'candidates' table not found — creating now...")
@@ -364,6 +427,8 @@ def get_candidates():
                     education TEXT,
                     experience TEXT,
                     resume_filename VARCHAR(255),
+                    ctc VARCHAR(50),
+                    ectc VARCHAR(50),
                     created_by INT DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (created_by) REFERENCES users(id)
@@ -372,51 +437,39 @@ def get_candidates():
             conn.commit()
             print("✅ 'candidates' table created successfully!")
 
-        # ------------------------------------------------
-        # 3️⃣ Check if created_by column exists — if not, ADD it
-        # ------------------------------------------------
+        # 3️⃣ Ensure ctc + ectc columns exist
         cursor.execute("""
             SELECT COLUMN_NAME 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = 'ats_system'
-            AND TABLE_NAME = 'candidates'
-            AND COLUMN_NAME = 'created_by'
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA='ats'
+            AND TABLE_NAME='candidates'
         """)
+        cols = [row["COLUMN_NAME"] for row in cursor.fetchall()]
 
-        if not cursor.fetchone():
-            print("⚠ 'created_by' column missing — adding now...")
-            cursor.execute("""
-                ALTER TABLE candidates 
-                ADD COLUMN created_by INT DEFAULT NULL,
-                ADD FOREIGN KEY (created_by) REFERENCES users(id)
-            """)
+        if "ctc" not in cols:
+            print("⚠ Adding 'ctc' column")
+            cursor.execute("ALTER TABLE candidates ADD COLUMN ctc VARCHAR(50)")
             conn.commit()
-            print("✅ Added 'created_by' column!")
 
-        # ------------------------------------------------
-        # 4️⃣ Fetch candidates with role-based filtering
-        # ------------------------------------------------
-        # Get user info from query params
+        if "ectc" not in cols:
+            print("⚠ Adding 'ectc' column")
+            cursor.execute("ALTER TABLE candidates ADD COLUMN ectc VARCHAR(50)")
+            conn.commit()
+
+        # 4️⃣ Role-based filtering
         user_id = request.args.get("user_id", type=int)
         user_role = request.args.get("user_role", "").upper()
-        
-        # Build query based on role
+
         if user_role == "RECRUITER" and user_id:
-            # Recruiters only see their own candidates
             cursor.execute(
-                "SELECT * FROM candidates WHERE created_by = %s ORDER BY id DESC",
+                "SELECT * FROM candidates WHERE created_by=%s ORDER BY id DESC",
                 (user_id,)
             )
-            print(f"🔍 Filtering candidates for RECRUITER (user_id={user_id})")
         elif user_role in ["ADMIN", "DELIVERY_MANAGER"]:
-            # Admin and DM see all candidates
             cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
-            print(f"🔍 Showing all candidates for {user_role}")
         else:
-            # Default: show all (for backward compatibility or guest access)
             cursor.execute("SELECT * FROM candidates ORDER BY id DESC")
-            print("🔍 Showing all candidates (no role filter)")
-        
+
         rows = cursor.fetchall()
         print(f"✅ Found {len(rows)} candidates")
 
@@ -428,6 +481,7 @@ def get_candidates():
     except Exception as e:
         print("❌ Error:", str(e))
         return jsonify({"error": str(e)}), 500
+
 # --------------------------------------------------------
 
 # Create users table if it doesn't exist
@@ -443,8 +497,10 @@ def update_candidate(id):
         skills = request.form.get("skills")
         education = request.form.get("education")
         experience = request.form.get("experience")
+        ctc = request.form.get("ctc")
+        ectc = request.form.get("ectc")
+
         resume = request.files.get("resume")
-        new_status = request.form.get("status")
 
         conn = get_db_connection()
         if not conn:
@@ -455,36 +511,77 @@ def update_candidate(id):
         if resume and allowed_file(resume.filename):
             filename = secure_filename(resume.filename)
             resume.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+
             cursor.execute("""
                 UPDATE candidates 
-                SET name=%s, email=%s, phone=%s, skills=%s, education=%s, experience=%s, resume_filename=%s
+                SET name=%s, email=%s, phone=%s, skills=%s, education=%s, experience=%s,
+                    ctc=%s, ectc=%s, resume_filename=%s
                 WHERE id=%s
-            """, (name, email, phone, skills, education, experience, filename, id))
+            """, (name, email, phone, skills, education, experience, ctc, ectc, filename, id))
+
         else:
             cursor.execute("""
                 UPDATE candidates 
-                SET name=%s, email=%s, phone=%s, skills=%s, education=%s, experience=%s
+                SET name=%s, email=%s, phone=%s, skills=%s, education=%s, experience=%s,
+                    ctc=%s, ectc=%s
                 WHERE id=%s
-            """, (name, email, phone, skills, education, experience, id))
+            """, (name, email, phone, skills, education, experience, ctc, ectc, id))
 
-        # Get current user for notification (only if status is being updated)
-        if new_status:
-            current_user = get_current_user()
-            notify_event("candidate_status_change", {
-                "candidate_id": id,
-                "status": new_status,
-                "user": current_user.get("name", "Unknown"),
-                "candidate_name": name,
-                "candidate_email": email
-            })
         conn.commit()
         cursor.close()
         conn.close()
 
         return jsonify({"message": "✅ Candidate updated successfully!"}), 200
+
     except Exception as e:
         print(e)
         return jsonify({"message": str(e)}), 500
+
+
+@app.route('/get-users', methods=['GET'])
+def get_users():
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"message": "Database connection failed"}), 500
+
+        cursor = conn.cursor(dictionary=True)
+
+        # Fetch users with fallback to usersdata
+        cursor.execute("""
+            SELECT 
+                u.id,
+                u.name,
+                u.email,
+                COALESCE(u.phone, ud.phone) AS phone,
+                u.role,
+                COALESCE(u.status, 'ACTIVE') AS status,
+                u.created_at
+            FROM users u
+            LEFT JOIN usersdata ud ON ud.email = u.email
+            ORDER BY u.created_at DESC
+        """)
+
+        users = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        # --- NEW: Validate roles based on ENUM ---
+        allowed_roles = get_allowed_roles()
+
+        for user in users:
+            if allowed_roles and user["role"] not in allowed_roles:
+                user["role_valid"] = False
+                user["allowed_roles"] = allowed_roles
+            else:
+                user["role_valid"] = True
+
+        return jsonify(users), 200
+
+    except Exception as e:
+        return jsonify({"message": "❌ Error fetching users", "error": str(e)}), 500
+
 
 
 @app.route("/delete-candidate/<int:id>", methods=["DELETE"])
@@ -519,19 +616,26 @@ def create_user():
         if not all([name, email, password]):
             return jsonify({"message": "name, email, and password are required"}), 400
 
+        # --- ADD: Validate role against ENUM ---
+        allowed_roles = get_allowed_roles()
+        if allowed_roles and role not in allowed_roles:
+            return jsonify({
+                "message": f"Invalid role. Allowed roles: {', '.join(allowed_roles)}"
+            }), 400
+
         # Hash the password
         password_hash = hashlib.sha256(password.encode()).hexdigest()
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Insert new user
+        # Insert new user into usersdata
         cursor.execute("""
             INSERT INTO usersdata (name, email, phone, role, password_hash)
             VALUES (%s, %s, %s, %s, %s)
         """, (name, email, phone, role, password_hash))
-        conn.commit()
 
+        conn.commit()
         cursor.close()
         conn.close()
 
@@ -545,39 +649,11 @@ def create_user():
 # -------------------------------
 # API: Get All Users (Admin view)
 # -------------------------------
-@app.route('/get-users', methods=['GET'])
-def get_users():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT 
-                u.id,
-                u.name,
-                u.email,
-                COALESCE(u.phone, ud.phone) AS phone,
-                u.role,
-                COALESCE(u.status, 'ACTIVE') AS status,
-                u.created_at
-            FROM users u
-            LEFT JOIN usersdata ud ON ud.email = u.email
-            ORDER BY u.created_at DESC
-        """)
-        users = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        return jsonify(users), 200
-    except Exception as e:
-        return jsonify({"message": "❌ Error fetching users", "error": str(e)}), 500
-
-
 @app.route('/users/<int:user_id>/details', methods=['GET'])
 def get_user_details(user_id):
     """
-    Provide a consolidated view of a user's profile, assigned requirements, and owned candidates.
-    This endpoint is intentionally unrestricted so any authorized frontend feature (admin portal, recruiter dashboard,
-    AI assistant, etc.) can fetch rich context for a specific user id.
+    Provide unified view: user profile, assigned requirements, created candidates,
+    and organization stats for ADMINS / DELIVERY_MANAGERS.
     """
     try:
         conn = get_db_connection()
@@ -609,8 +685,17 @@ def get_user_details(user_id):
             conn.close()
             return jsonify({"error": "User not found"}), 404
 
+        # --- NEW: Validate user role against ENUM ---
+        allowed_roles = get_allowed_roles()
+        if allowed_roles and user_row["role"] not in allowed_roles:
+            return jsonify({
+                "error": "Invalid role stored in database",
+                "role_found": user_row["role"],
+                "valid_roles": allowed_roles
+            }), 400
+
         # ------------------------------------------------
-        # 2️⃣ Requirements assigned to the user (if recruiter)
+        # 2️⃣ Requirements assigned to this recruiter
         # ------------------------------------------------
         cursor.execute("""
             SELECT
@@ -657,6 +742,7 @@ def get_user_details(user_id):
 
         response_payload = {
             "user": user_row,
+            "allowed_roles": allowed_roles,          # ⭐ Return ENUM roles for frontend use
             "assigned_requirements": assigned_requirements,
             "assigned_requirement_count": len(assigned_requirements),
             "created_candidates": created_candidates,
@@ -664,7 +750,7 @@ def get_user_details(user_id):
         }
 
         # ------------------------------------------------
-        # 4️⃣ Organization-wide stats for elevated roles
+        # 4️⃣ If ADMIN or DELIVERY_MANAGER → return org-wide summary
         # ------------------------------------------------
         if user_row["role"] in ("ADMIN", "DELIVERY_MANAGER"):
             org_stats = {}
@@ -688,10 +774,43 @@ def get_user_details(user_id):
 
         cursor.close()
         conn.close()
+
         return jsonify(response_payload), 200
+
     except Exception as e:
         print("❌ Error building user details:", e)
         return jsonify({"error": str(e)}), 500
+
+
+
+@app.route("/create-screening-process", methods=["POST"])
+def create_screening_process():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""CREATE TABLE IF NOT EXISTS candidate_screening (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            candidate_id INT NOT NULL,
+            requirement_id VARCHAR(50) NOT NULL,
+            ai_score FLOAT,
+            ai_rationale TEXT,
+            recommend ENUM('SCREENED','REJECTED','SHORTLISTED'),
+            red_flags JSON,
+            model_version VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+            FOREIGN KEY (requirement_id) REFERENCES requirements(id)
+    );""")
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "✅ Screening process created successfully!"}), 200
+    except Exception as e:
+        print("❌ Error creating screening process:", e)
+        return jsonify({"message": "❌ Error creating screening Table", "error": str(e)}), 500
+
+
+
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -801,21 +920,57 @@ def update_user_status(user_id: int):
     try:
         data = request.get_json() or {}
         new_status = data.get('status')
-        if new_status is None:
+
+        if not new_status:
             return jsonify({"message": "status is required"}), 400
+
+        # --- NEW: Validate allowed statuses ---
+        allowed_statuses = ["ACTIVE", "INACTIVE"]
+        new_status = new_status.upper()
+
+        if new_status not in allowed_statuses:
+            return jsonify({
+                "message": "Invalid status value",
+                "allowed_statuses": allowed_statuses
+            }), 400
 
         conn = get_db_connection()
         if not conn:
             return jsonify({"message": "Database connection failed"}), 500
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET status = %s WHERE id = %s", (new_status, user_id))
+
+        cursor = conn.cursor(dictionary=True)
+
+        # --- NEW: Check user exists ---
+        cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+        user_exists = cursor.fetchone()
+
+        if not user_exists:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "User not found"}), 404
+
+        # --- Update status ---
+        cursor.execute(
+            "UPDATE users SET status = %s WHERE id = %s",
+            (new_status, user_id)
+        )
         conn.commit()
+
         cursor.close()
         conn.close()
-        return jsonify({"message": "✅ User status updated", "id": user_id, "status": new_status}), 200
+
+        return jsonify({
+            "message": "✅ User status updated",
+            "id": user_id,
+            "status": new_status
+        }), 200
+
     except Exception as e:
-        return jsonify({"message": "❌ Error updating user status", "error": str(e)}), 500
-    
+        return jsonify({
+            "message": "❌ Error updating user status",
+            "error": str(e)
+        }), 500
+   
 #fix allocations schema
 def fix_requirement_allocations_schema():
     try:
@@ -947,11 +1102,7 @@ def create_requirement():
 
         ctc_range_value = _sanitize_ctc(data.get("ctc_range"))
         # Frontend may send 'ectc_range' (expected CTC); DB column is 'ecto_range'
-        ecto_range_value = data.get("ecto_range")
-        if not ecto_range_value:
-            ecto_range_value = data.get("ectc_range")
-        ecto_range_value = _sanitize_ctc(ecto_range_value)
-
+        
         created_by_value = _sanitize_text(data.get("created_by"), 50).upper()
 
         conn = get_db_connection()
@@ -959,8 +1110,8 @@ def create_requirement():
 
         cursor.execute("""
             INSERT INTO requirements
-            (id, client_id, title, description, location, skills_required, experience_required, ctc_range, ecto_range, status, created_by)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'OPEN',%s)
+            (id, client_id, title, description, location, skills_required, experience_required, ctc_range, status, created_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'OPEN',%s)
         """, (
             req_id,
             client_id_value,
@@ -970,7 +1121,6 @@ def create_requirement():
             skills_value,
             experience_value,
             ctc_range_value,
-            ecto_range_value,
             created_by_value
         ))
 
@@ -1562,10 +1712,12 @@ if __name__ == '__main__':
     # Import AI routes after env loading (to avoid circular import issues)
     from controllers.ai_chat_controller import register_ai_routes
     from controllers.ai_jd_controller import jd_bp
+    from controllers.ai_screening import screening_bp
     initialize_database()
     ensure_admin_exists()
     ensure_user_status_defaults()
     # Register AI assistant routes without altering existing endpoints
     register_ai_routes(app)
     app.register_blueprint(jd_bp)
+    app.register_blueprint(screening_bp)
     app.run(debug=True)

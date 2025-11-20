@@ -5,7 +5,6 @@ import { createRequirement, fetchClients } from "../auth/authSlice";
 export default function CreateRequirements() {
   const dispatch = useDispatch();
   const [jdText, setJdText] = useState("");
-  const [autoData, setAutoData] = useState({});
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
 
@@ -19,7 +18,6 @@ export default function CreateRequirements() {
     skills_required: "",
     experience_required: "",
     ctc_range: "",
-    ectc_range: "",
   });
 
   async function handleAutoFill() {
@@ -36,9 +34,9 @@ export default function CreateRequirements() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jd_text: jdText })
       });
-      
+
       const data = await res.json();
-      
+
       if (data.error) {
         setAiError(data.error);
         alert(`AI Error: ${data.error}`);
@@ -46,8 +44,6 @@ export default function CreateRequirements() {
       }
 
       if (data.suggested_requirement) {
-        setAutoData(data.suggested_requirement);
-        // Map AI response to form fields
         setForm(prev => ({
           ...prev,
           title: data.suggested_requirement.title || prev.title,
@@ -55,7 +51,6 @@ export default function CreateRequirements() {
           skills_required: data.suggested_requirement.skills_required || prev.skills_required,
           experience_required: data.suggested_requirement.experience_required || prev.experience_required,
           ctc_range: data.suggested_requirement.ctc_range || prev.ctc_range,
-          ectc_range: data.suggested_requirement.ectc_range || data.suggested_requirement.expected_ctc_range || prev.ectc_range,
           description: data.suggested_requirement.description || prev.description,
         }));
         alert("✅ Form auto-filled from job description!");
@@ -71,7 +66,7 @@ export default function CreateRequirements() {
   const canCreate = ["ADMIN", "DELIVERY_MANAGER"].includes(user?.role);
 
   useEffect(() => {
-    dispatch(fetchClients());   // ✅ Load client list on page open
+    dispatch(fetchClients());
   }, [dispatch]);
 
   if (!canCreate) {
@@ -89,6 +84,7 @@ export default function CreateRequirements() {
   const handleSubmit = (e) => {
     e.preventDefault();
     const payload = { ...form, created_by: user?.role || "" };
+
     dispatch(createRequirement(payload))
       .unwrap()
       .then(() => {
@@ -101,7 +97,6 @@ export default function CreateRequirements() {
           skills_required: "",
           experience_required: "",
           ctc_range: "",
-          ectc_range: "",
         });
       })
       .catch(() => alert("❌ Error creating requirement"));
@@ -113,7 +108,7 @@ export default function CreateRequirements() {
         Create New Requirement
       </h2>
 
-      {/* ✨ AI JD Parser Section */}
+      {/* AI JD Section */}
       <div className="mb-6 p-4 bg-gray-50 rounded-lg border">
         <label className="block text-sm font-medium mb-2">
           📝 Paste Job Description (AI will auto-fill form)
@@ -122,14 +117,14 @@ export default function CreateRequirements() {
           <textarea
             value={jdText}
             onChange={(e) => setJdText(e.target.value)}
-            placeholder="Paste the complete job description here..."
+            placeholder="Paste the complete job description..."
             className="flex-1 border p-3 rounded h-32 resize-none"
           />
           <button
             type="button"
             onClick={handleAutoFill}
             disabled={aiLoading || !jdText.trim()}
-            className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+            className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition"
           >
             {aiLoading ? "⏳ Processing..." : "✨ AI Fill"}
           </button>
@@ -140,8 +135,7 @@ export default function CreateRequirements() {
       </div>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-6">
-
-        {/* ✅ Client Dropdown */}
+        
         <select
           name="client_id"
           value={form.client_id}
@@ -150,25 +144,21 @@ export default function CreateRequirements() {
           required
         >
           <option value="">Select Client</option>
-          {clients?.length > 0 &&
-            clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} {/* ✅ correct field */}
-              </option>
-            ))}
+          {clients?.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
         </select>
 
-        <input name="title" placeholder="Job Title" value={form.title} onChange={handleChange} className="border p-2 rounded" required/>
-        <input name="location" placeholder="Location" value={form.location} onChange={handleChange} className="border p-2 rounded" required/>
+        <input name="title" placeholder="Job Title" value={form.title} onChange={handleChange} className="border p-2 rounded" required />
+        <input name="location" placeholder="Location" value={form.location} onChange={handleChange} className="border p-2 rounded" required />
 
-        <input name="experience_required" placeholder="Experience (years)" value={form.experience_required} onChange={handleChange} className="border p-2 rounded"/>
-        <input name="skills_required" placeholder="Skills (comma separated)" value={form.skills_required} onChange={handleChange} className="border p-2 rounded"/>
+        <input name="experience_required" placeholder="Experience (years)" value={form.experience_required} onChange={handleChange} className="border p-2 rounded" />
+        <input name="skills_required" placeholder="Skills (comma separated)" value={form.skills_required} onChange={handleChange} className="border p-2 rounded" />
 
-        <input name="ctc_range" placeholder="CTC Range" value={form.ctc_range} onChange={handleChange} className="border p-2 rounded"/>
-        <input name="ectc_range" placeholder="Expected CTC" value={form.ectc_range} onChange={handleChange} className="border p-2 rounded"/>
+        <input name="ctc_range" placeholder="CTC Range" value={form.ctc_range} onChange={handleChange} className="border p-2 rounded" />
 
-        <textarea name="description" placeholder="Job Description" value={form.description} onChange={handleChange} className="border p-2 rounded col-span-2 h-24" required></textarea>
-        
+        <textarea name="description" placeholder="Job Description" value={form.description} onChange={handleChange} className="border p-2 rounded col-span-2 h-24" required />
+
         <button className="bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 col-span-2">
           Create Requirement
         </button>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -6,7 +6,7 @@ export default function CandidateApplicationUI() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useSelector((state) => state.auth);
-  
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -14,31 +14,38 @@ export default function CandidateApplicationUI() {
     skills: "",
     education: "",
     experience: "",
+    ctc: "",
+    ectc: "",
   });
+
   const [resume, setResume] = useState(null);
-  const [message, setMessage] = useState("");
   const [candidates, setCandidates] = useState([]);
-  const [editCandidateId, setEditCandidateId] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [message, setMessage] = useState("");
+  const [requirementsOptions, setRequirementsOptions] = useState([]);
+  const [requirementsLoading, setRequirementsLoading] = useState(false);
 
-  // Get recruiterId from query params if coming from recruiter dashboard
   const recruiterIdFromQuery = searchParams.get("recruiterId");
-  // Use query param recruiterId if available, otherwise use logged-in user id
-  const createdByUserId = recruiterIdFromQuery ? parseInt(recruiterIdFromQuery) : (user?.id || null);
+  const createdByUserId = recruiterIdFromQuery
+    ? parseInt(recruiterIdFromQuery)
+    : user?.id || null;
 
-  // Fetch candidates from backend with role-based filtering
+  // ----------------------------------------------------
+  // LOAD CANDIDATES
+  // ----------------------------------------------------
   const fetchCandidates = async () => {
     try {
-      // Pass user info to filter candidates by role
       const params = new URLSearchParams();
       if (user?.id) {
         params.append("user_id", user.id);
         params.append("user_role", user.role || "");
       }
-      const response = await fetch(`http://localhost:5000/get-candidates?${params.toString()}`);
-      const data = await response.json();
-      setCandidates(data);
-    } catch (error) {
-      console.error("Error fetching candidates:", error);
+
+      const res = await fetch(`http://localhost:5000/get-candidates?${params}`);
+      const data = await res.json();
+      setCandidates(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Fetch candidates error:", err);
     }
   };
 
@@ -46,280 +53,351 @@ export default function CandidateApplicationUI() {
     fetchCandidates();
   }, [user]);
 
-  // Handle input changes
+  useEffect(() => {
+    const fetchRequirements = async () => {
+      try {
+        setRequirementsLoading(true);
+        const res = await fetch("http://localhost:5000/get-requirements");
+        const data = await res.json();
+        setRequirementsOptions(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Fetch requirements error:", error);
+        setRequirementsOptions([]);
+      } finally {
+        setRequirementsLoading(false);
+      }
+    };
+
+    fetchRequirements();
+  }, []);
+
+  // ----------------------------------------------------
+  // FORM CHANGE HANDLERS
+  // ----------------------------------------------------
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  // Handle file input
-  const handleFileChange = (e) => {
-    setResume(e.target.files[0]);
-  };
+  const handleFileChange = (e) => setResume(e.target.files[0] || null);
 
-  // Submit or Update candidate
+  // ----------------------------------------------------
+  // CREATE / UPDATE CANDIDATE
+  // ----------------------------------------------------
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     const data = new FormData();
-    Object.entries(formData).forEach(([key, value]) => data.append(key, value));
+    Object.entries(formData).forEach(([k, v]) => data.append(k, v));
+
     if (resume) data.append("resume", resume);
-    
-    // Include created_by if user is a recruiter (only for new submissions, not updates)
-    if (!editCandidateId && createdByUserId) {
-      data.append("created_by", createdByUserId);
+    if (!editId && createdByUserId) data.append("created_by", createdByUserId);
+
+    let url = "http://localhost:5000/submit-candidate";
+    let method = "POST";
+
+    if (editId) {
+      url = `http://localhost:5000/update-candidate/${editId}`;
+      method = "PUT";
     }
 
     try {
-      let url = "http://localhost:5000/submit-candidate";
-      let method = "POST";
+      const res = await fetch(url, { method, body: data });
+      const result = await res.json();
 
-      if (editCandidateId) {
-        url = `http://localhost:5000/update-candidate/${editCandidateId}`;
-        method = "PUT";
-      }
+      if (res.ok) {
+        setMessage(result.message);
+        resetForm();
+        fetchCandidates();
 
-      const response = await fetch(url, { method, body: data });
-      const result = await response.json();
-
-      if (response.ok) {
-        setMessage(`✅ ${result.message}`);
-        fetchCandidates(); // refresh list
-        setFormData({
-          name: "",
-          email: "",
-          phone: "",
-          skills: "",
-          education: "",
-          experience: "",
-        });
-        setResume(null);
-        setEditCandidateId(null);
-        
-        // Navigate back to recruiter dashboard if came from there
+        // return recruiter dashboard
         const fromState = window.history.state?.usr?.from;
         if (fromState === "/recruiter-dashboard") {
-          setTimeout(() => navigate("/recruiter-dashboard"), 1500);
+          setTimeout(() => navigate("/recruiter-dashboard"), 1200);
         }
       } else {
-        setMessage(`❌ ${result.message || "Failed to submit"}`);
+        setMessage(result.message || "Failed");
       }
-    } catch (error) {
-      console.error(error);
-      setMessage("❌ Server not reachable. Check backend.");
+    } catch (err) {
+      console.error(err);
+      setMessage("Server offline. Check backend.");
     }
   };
 
-  // Edit candidate
-  const handleEdit = (candidate) => {
-    setEditCandidateId(candidate.id);
+  // ----------------------------------------------------
+  // EDIT CANDIDATE
+  // ----------------------------------------------------
+  const handleEdit = (item) => {
+    setEditId(item.id);
     setFormData({
-      name: candidate.name,
-      email: candidate.email,
-      phone: candidate.phone,
-      skills: candidate.skills,
-      education: candidate.education,
-      experience: candidate.experience,
+      name: item.name,
+      email: item.email,
+      phone: item.phone,
+      skills: item.skills,
+      education: item.education,
+      experience: item.experience,
+      ctc: item.ctc || "",
+      ectc: item.ectc || "",
     });
-    setMessage("✏ Editing candidate...");
+    setMessage("Editing candidate...");
   };
 
-  // Delete candidate
+  // ----------------------------------------------------
+  // DELETE CANDIDATE
+  // ----------------------------------------------------
   const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this candidate?")) return;
+    if (!window.confirm("Delete this candidate?")) return;
+
     try {
-      const response = await fetch(`http://localhost:5000/delete-candidate/${id}`, {
+      const res = await fetch(`http://localhost:5000/delete-candidate/${id}`, {
         method: "DELETE",
       });
-      const result = await response.json();
+      const result = await res.json();
 
-      if (response.ok) {
-        setMessage(`🗑 ${result.message}`);
+      if (res.ok) {
+        setMessage(result.message);
         fetchCandidates();
       } else {
-        setMessage(`❌ ${result.message || "Failed to delete"}`);
+        setMessage(result.message || "Delete failed");
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage("Server error.");
+    }
+  };
+
+  // ----------------------------------------------------
+  // RESET FORM
+  // ----------------------------------------------------
+  const resetForm = () => {
+    setFormData({
+      name: "",
+      email: "",
+      phone: "",
+      skills: "",
+      education: "",
+      experience: "",
+      ctc: "",
+      ectc: "",
+    });
+    setResume(null);
+    setEditId(null);
+  };
+
+  // ----------------------------------------------------
+  // UI SECTION
+  // ----------------------------------------------------
+  const [screenCandidate, setScreenCandidate] = useState(null);
+  const [selectedRequirementId, setSelectedRequirementId] = useState("");
+  const [requirementSearch, setRequirementSearch] = useState("");
+  const [screenError, setScreenError] = useState("");
+  const [showScreenModal, setShowScreenModal] = useState(false);
+  const [screenLoading, setScreenLoading] = useState(false);
+  const [screeningResult, setScreeningResult] = useState(null);
+
+  const filteredRequirements = useMemo(() => {
+    if (!requirementSearch) return requirementsOptions;
+    return requirementsOptions.filter((req) => {
+      const haystack = `${req.title} ${req.location} ${req.client_id || ""}`.toLowerCase();
+      return haystack.includes(requirementSearch.toLowerCase());
+    });
+  }, [requirementsOptions, requirementSearch]);
+
+  const openScreenModal = (candidate) => {
+    setScreenCandidate(candidate);
+    setSelectedRequirementId("");
+    setRequirementSearch("");
+    setScreenError("");
+    setShowScreenModal(true);
+  };
+
+  const handleScreenCandidate = async () => {
+    if (!screenCandidate || !selectedRequirementId) {
+      setScreenError("Please select a requirement to compare against.");
+      return;
+    }
+
+    setScreenLoading(true);
+    setScreenError("");
+
+    try {
+      const response = await fetch("http://localhost:5000/api/screen-candidate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidate_id: screenCandidate.id,
+          requirement_id: selectedRequirementId,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        setScreenError(data.error || "AI screening failed");
+      } else {
+        setScreeningResult(data.result);
+        setShowScreenModal(false);
       }
     } catch (error) {
       console.error(error);
-      setMessage("❌ Server not reachable. Check backend.");
+      setScreenError("Server error. Check backend.");
     }
+
+    setScreenLoading(false);
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-8 bg-white shadow-lg rounded-2xl space-y-10">
-      {/* Form Section */}
+    <div className="max-w-5xl mx-auto p-8 bg-white rounded-xl shadow-md space-y-10">
+      <h2 className="text-2xl font-bold mb-2 text-gray-700 text-center">
+        {editId ? "Edit Candidate" : "Candidate Application"}
+      </h2>
+
+      {message && (
+        <p className="text-center text-green-600 font-medium">{message}</p>
+      )}
+
+      {/* FORM */}
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+          <input
+            name="name"
+            value={formData.name}
+            onChange={handleChange}
+            placeholder="Full Name"
+            className="border p-3 rounded"
+            required
+          />
+
+          <input
+            name="email"
+            type="email"
+            value={formData.email}
+            onChange={handleChange}
+            placeholder="Email"
+            className="border p-3 rounded"
+            required
+          />
+
+          <input
+            name="phone"
+            value={formData.phone}
+            onChange={handleChange}
+            placeholder="Phone"
+            className="border p-3 rounded"
+          />
+
+          <input
+            name="skills"
+            value={formData.skills}
+            onChange={handleChange}
+            placeholder="Skills (comma separated)"
+            className="border p-3 rounded"
+          />
+
+          <input
+            name="ctc"
+            value={formData.ctc}
+            onChange={handleChange}
+            placeholder="Current CTC (LPA)"
+            className="border p-3 rounded"
+          />
+
+          <input
+            name="ectc"
+            value={formData.ectc}
+            onChange={handleChange}
+            placeholder="Expected CTC (LPA)"
+            className="border p-3 rounded"
+          />
+        </div>
+
+        <textarea
+          name="education"
+          value={formData.education}
+          onChange={handleChange}
+          placeholder="Education Summary"
+          className="border w-full p-3 rounded"
+          rows={3}
+        />
+
+        <textarea
+          name="experience"
+          value={formData.experience}
+          onChange={handleChange}
+          placeholder="Experience Summary"
+          className="border w-full p-3 rounded"
+          rows={4}
+        />
+
+        {/* RESUME UPLOAD */}
+        <div>
+          <label className="block mb-1 font-medium">Upload Resume</label>
+          <input type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} />
+        </div>
+
+        <div className="flex justify-between">
+          <button className="bg-green-600 text-white px-6 py-2 rounded">
+            {editId ? "Update" : "Submit"}
+          </button>
+
+          <button
+            type="button"
+            onClick={resetForm}
+            className="border px-6 py-2 rounded"
+          >
+            Clear
+          </button>
+        </div>
+      </form>
+
+      {/* CANDIDATE LIST */}
       <div>
-        <h2 className="text-2xl font-semibold mb-6 text-gray-800 text-center">
-          {editCandidateId ? "✏ Edit Candidate" : "🧾 Candidate Application"}
-        </h2>
-
-        {message && (
-          <p className="text-center mb-4 font-medium text-green-600">{message}</p>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium mb-1">Full Name</label>
-              <input
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                type="text"
-                placeholder="Enter full name"
-                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Email</label>
-              <input
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                type="email"
-                placeholder="you@example.com"
-                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Phone</label>
-              <input
-                name="phone"
-                value={formData.phone}
-                onChange={handleChange}
-                type="tel"
-                placeholder="+91 98765 43210"
-                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Skills</label>
-              <input
-                name="skills"
-                value={formData.skills}
-                onChange={handleChange}
-                type="text"
-                placeholder="React, Node.js, SQL..."
-                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-400"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Education Summary</label>
-            <textarea
-              name="education"
-              value={formData.education}
-              onChange={handleChange}
-              placeholder="E.g., B.Tech in Computer Science from XYZ University"
-              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-400"
-              rows="3"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Experience Summary</label>
-            <textarea
-              name="experience"
-              value={formData.experience}
-              onChange={handleChange}
-              placeholder="E.g., 3 years as Frontend Developer at ABC Corp"
-              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-400"
-              rows="4"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Upload Resume (PDF/DOCX)</label>
-            <div className="border-dashed border-2 border-gray-300 rounded-lg p-6 text-center hover:border-green-400 transition">
-              <input
-                type="file"
-                id="resume"
-                className="hidden"
-                accept=".pdf,.docx,.doc"
-                onChange={handleFileChange}
-              />
-              <label
-                htmlFor="resume"
-                className="cursor-pointer text-green-600 hover:underline"
-              >
-                {editCandidateId ? "Click to upload new resume (optional)" : "Click to upload resume"}
-              </label>
-              {resume && <p className="text-sm text-gray-700 mt-2">{resume.name}</p>}
-            </div>
-          </div>
-
-          <div className="flex justify-between mt-6">
-            <button
-              type="submit"
-              className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition"
-            >
-              {editCandidateId ? "Update Candidate" : "Submit Application"}
-            </button>
-
-            <button
-              type="reset"
-              className="border border-gray-300 px-6 py-2 rounded-lg hover:bg-gray-100 transition"
-              onClick={() => {
-                setFormData({
-                  name: "",
-                  email: "",
-                  phone: "",
-                  skills: "",
-                  education: "",
-                  experience: "",
-                });
-                setResume(null);
-                setEditCandidateId(null);
-                setMessage("");
-              }}
-            >
-              Clear
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Candidate List Section */}
-      <div>
-        <h2 className="text-xl font-semibold mb-4 text-gray-800">📋 Candidate List</h2>
+        <h3 className="text-xl font-semibold mb-4">Candidate List</h3>
 
         {candidates.length === 0 ? (
-          <p className="text-gray-500 text-center">No candidates found.</p>
+          <p className="text-gray-500">No candidates found.</p>
         ) : (
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-green-100 text-left">
-                <th className="p-3 border">Name</th>
-                <th className="p-3 border">Email</th>
-                <th className="p-3 border">Phone</th>
-                <th className="p-3 border">Skills</th>
-                <th className="p-3 border">Actions</th>
+          <table className="w-full border">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="p-2 border">Name</th>
+                <th className="p-2 border">Email</th>
+                <th className="p-2 border">Phone</th>
+                <th className="p-2 border">Skills</th>
+                <th className="p-2 border">CTC</th>
+                <th className="p-2 border">ECTC</th>
+                <th className="p-2 border text-center">Actions</th>
               </tr>
             </thead>
+
             <tbody>
-              {candidates.map((candidate) => (
-                <tr key={candidate.id} className="hover:bg-gray-50">
-                  <td className="p-3 border">{candidate.name}</td>
-                  <td className="p-3 border">{candidate.email}</td>
-                  <td className="p-3 border">{candidate.phone}</td>
-                  <td className="p-3 border">{candidate.skills}</td>
-                  <td className="p-3 border flex gap-2">
+              {candidates.map((c) => (
+                <tr key={c.id} className="border">
+                  <td className="p-2 border">{c.name}</td>
+                  <td className="p-2 border">{c.email}</td>
+                  <td className="p-2 border">{c.phone}</td>
+                  <td className="p-2 border">{c.skills}</td>
+                  <td className="p-2 border">{c.ctc || "-"}</td>
+                  <td className="p-2 border">{c.ectc || "-"}</td>
+                  <td className="p-2 border text-center flex gap-2 justify-center flex-wrap">
                     <button
-                      onClick={() => handleEdit(candidate)}
-                      className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
+                      onClick={() => handleEdit(c)}
+                      className="bg-blue-500 text-white px-3 py-1 rounded"
                     >
                       Edit
                     </button>
+
                     <button
-                      onClick={() => handleDelete(candidate.id)}
-                      className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
+                      onClick={() => handleDelete(c.id)}
+                      className="bg-red-500 text-white px-3 py-1 rounded"
                     >
                       Delete
+                    </button>
+
+                    <button
+                      onClick={() => openScreenModal(c)}
+                      className="bg-green-600 text-white px-3 py-1 rounded"
+                    >
+                      Screen
                     </button>
                   </td>
                 </tr>
@@ -328,6 +406,154 @@ export default function CandidateApplicationUI() {
           </table>
         )}
       </div>
+
+      {/* Screening Requirement Picker */}
+      {showScreenModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 relative">
+            <button
+              className="absolute right-4 top-4 text-gray-500 hover:text-gray-700"
+              onClick={() => {
+                setShowScreenModal(false);
+                setScreenError("");
+              }}
+            >
+              ✕
+            </button>
+
+            <h3 className="text-xl font-semibold mb-2">
+              Select Requirement for {screenCandidate?.name}
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Choose which requirement you want to compare this candidate against.
+            </p>
+
+            <input
+              type="text"
+              value={requirementSearch}
+              onChange={(e) => setRequirementSearch(e.target.value)}
+              placeholder="Search by title, client, location..."
+              className="w-full border rounded-lg px-3 py-2 mb-3"
+            />
+
+            <div className="max-h-56 overflow-y-auto space-y-2 border rounded-lg p-2">
+              {requirementsLoading ? (
+                <p className="text-center text-gray-500 py-4">Loading requirements...</p>
+              ) : filteredRequirements.length === 0 ? (
+                <p className="text-center text-gray-500 py-4">
+                  No matching requirements found.
+                </p>
+              ) : (
+                filteredRequirements.map((req) => (
+                  <button
+                    key={req.id}
+                    type="button"
+                    onClick={() => setSelectedRequirementId(req.id)}
+                    className={`w-full text-left border rounded-lg px-3 py-2 transition ${
+                      selectedRequirementId === req.id
+                        ? "border-green-500 bg-green-50"
+                        : "border-gray-200 hover:border-gray-400"
+                    }`}
+                  >
+                    <div className="flex justify-between text-sm font-medium">
+                      <span>{req.title}</span>
+                      <span className="text-gray-500">{req.location || "--"}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      ID: {req.id} • Skills: {req.skills_required || "--"}
+                    </p>
+                  </button>
+                ))
+              )}
+            </div>
+
+            {screenError && (
+              <p className="text-red-500 text-sm mt-3">{screenError}</p>
+            )}
+
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                className="px-4 py-2 rounded-lg border"
+                onClick={() => {
+                  setShowScreenModal(false);
+                  setScreenError("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg bg-green-600 text-white disabled:opacity-50"
+                onClick={handleScreenCandidate}
+                disabled={screenLoading || !selectedRequirementId}
+              >
+                {screenLoading ? "Screening..." : "Run Screening"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Screening Result Modal */}
+      {screeningResult && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 relative">
+            <button
+              className="absolute right-4 top-4 text-gray-500 hover:text-gray-700"
+              onClick={() => setScreeningResult(null)}
+            >
+              ✕
+            </button>
+
+            <h3 className="text-2xl font-semibold mb-4 text-center">
+              🤖 AI Screening Result
+            </h3>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm text-gray-500">AI Score</p>
+                <p className="text-3xl font-bold text-gray-800">
+                  {screeningResult.score}/100
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Recommendation</p>
+                <span
+                  className={`px-4 py-1 rounded-full text-sm font-semibold ${
+                    screeningResult.recommend === "SHORTLISTED"
+                      ? "bg-green-100 text-green-700"
+                      : screeningResult.recommend === "REJECTED"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-yellow-100 text-yellow-700"
+                  }`}
+                >
+                  {screeningResult.recommend}
+                </span>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-500 mb-1">📌 Rationale</p>
+                <ul className="list-disc list-inside text-gray-700 space-y-1">
+                  {screeningResult.rationale?.map((item, idx) => (
+                    <li key={idx}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+
+              {screeningResult.red_flags?.length > 0 && (
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">⚠ Red Flags</p>
+                  <ul className="list-disc list-inside text-red-600 space-y-1">
+                    {screeningResult.red_flags.map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

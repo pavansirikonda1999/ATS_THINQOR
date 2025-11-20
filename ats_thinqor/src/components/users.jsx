@@ -16,20 +16,33 @@ export default function Users() {
 
   const [search, setSearch] = useState("");
   const [editingUser, setEditingUser] = useState(null);
+
+  // Default form state
   const [form, setForm] = useState({
     name: "",
     email: "",
     phone: "",
     role: "",
     password: "",
-    status: "active",
+    status: "ACTIVE",
   });
 
-  // ✅ Corrected fetchUsers call
+  // NEW: Dynamic roles from backend
+  const [roles, setRoles] = useState([]);
+
+  // Fetch users on page load
   useEffect(() => {
     dispatch(fetchUsers());
   }, [dispatch]);
 
+  // Fetch roles (NEW)
+  useEffect(() => {
+    fetch("http://localhost:5000/roles")
+      .then((res) => res.json())
+      .then((data) => setRoles(data.roles || []));
+  }, []);
+
+  // Auto-clear messages
   useEffect(() => {
     if (successMessage || error) {
       const timer = setTimeout(() => dispatch(clearMessages()), 3000);
@@ -48,18 +61,33 @@ export default function Users() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+
     if (editingUser) {
       dispatch(updateUser({ id: editingUser.id, ...form })).then((res) => {
         if (res.meta.requestStatus === "fulfilled") {
           setEditingUser(null);
-          setForm({ name: "", email: "", phone: "", role: "", password: "" });
+          setForm({
+            name: "",
+            email: "",
+            phone: "",
+            role: "",
+            password: "",
+            status: "ACTIVE",
+          });
           dispatch(fetchUsers());
         }
       });
     } else {
       dispatch(createUser(form)).then((res) => {
         if (res.meta.requestStatus === "fulfilled") {
-          setForm({ name: "", email: "", phone: "", role: "", password: "" });
+          setForm({
+            name: "",
+            email: "",
+            phone: "",
+            role: "",
+            password: "",
+            status: "ACTIVE",
+          });
           dispatch(fetchUsers());
         }
       });
@@ -73,7 +101,8 @@ export default function Users() {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      password: "", // optional
+      password: "",
+      status: user.status || "ACTIVE",
     });
   };
 
@@ -97,7 +126,11 @@ export default function Users() {
         <h3 className="text-lg font-semibold mb-3">
           {editingUser ? "Edit User" : "Add New User"}
         </h3>
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+        <form
+          onSubmit={handleSubmit}
+          className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+        >
           <input
             type="text"
             placeholder="Full Name *"
@@ -106,6 +139,7 @@ export default function Users() {
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             required
           />
+
           <input
             type="email"
             placeholder="Email *"
@@ -114,6 +148,7 @@ export default function Users() {
             onChange={(e) => setForm({ ...form, email: e.target.value })}
             required
           />
+
           <input
             type="text"
             placeholder="Phone Number *"
@@ -122,13 +157,22 @@ export default function Users() {
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
             required
           />
-          <input
-            type="text"
-            placeholder="Role"
+
+          {/* UPDATED: Dynamic Role Dropdown */}
+          <select
             className="border p-2 rounded"
             value={form.role}
             onChange={(e) => setForm({ ...form, role: e.target.value })}
-          />
+            required
+          >
+            <option value="">Select Role</option>
+            {roles.map((r) => (
+              <option key={r} value={r}>
+                {r.replace("_", " ")}
+              </option>
+            ))}
+          </select>
+
           <input
             type="password"
             placeholder={editingUser ? "New Password (optional)" : "Password *"}
@@ -137,6 +181,7 @@ export default function Users() {
             onChange={(e) => setForm({ ...form, password: e.target.value })}
             required={!editingUser}
           />
+
           <div className="flex gap-2">
             <button
               type="submit"
@@ -145,12 +190,20 @@ export default function Users() {
             >
               {loading ? "Saving..." : editingUser ? "Update User" : "Add User"}
             </button>
+
             {editingUser && (
               <button
                 type="button"
                 onClick={() => {
                   setEditingUser(null);
-                  setForm({ name: "", email: "", phone: "", role: "", password: "" });
+                  setForm({
+                    name: "",
+                    email: "",
+                    phone: "",
+                    role: "",
+                    password: "",
+                    status: "ACTIVE",
+                  });
                 }}
                 className="bg-gray-400 text-white py-2 px-4 rounded hover:bg-gray-500"
               >
@@ -175,6 +228,7 @@ export default function Users() {
       {/* Users Table */}
       <div className="bg-white shadow rounded p-5">
         <h3 className="font-semibold text-lg mb-3">Users List</h3>
+
         <table className="w-full border text-sm">
           <thead className="bg-gray-100 text-left">
             <tr>
@@ -185,13 +239,17 @@ export default function Users() {
               <th className="p-2 border text-center">Actions</th>
             </tr>
           </thead>
+
           <tbody>
             {filtered.map((u) => (
               <tr key={u.id} className="hover:bg-gray-50">
                 <td className="p-2 border">{u.name}</td>
                 <td className="p-2 border">{u.email}</td>
                 <td className="p-2 border">{u.phone || "-"}</td>
-                <td className="p-2 border">{u.role || "-"}</td>
+                <td className="p-2 border capitalize">
+                  {u.role?.replace("_", " ") || "-"}
+                </td>
+
                 <td className="p-2 border text-center">
                   <button
                     onClick={() => handleEdit(u)}
@@ -199,6 +257,7 @@ export default function Users() {
                   >
                     Edit
                   </button>
+
                   <button
                     onClick={() => handleDelete(u.id)}
                     className="bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600"
@@ -208,6 +267,7 @@ export default function Users() {
                 </td>
               </tr>
             ))}
+
             {filtered.length === 0 && (
               <tr>
                 <td colSpan="5" className="p-2 border text-center text-gray-500">

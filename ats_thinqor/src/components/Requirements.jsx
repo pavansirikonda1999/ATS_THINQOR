@@ -20,9 +20,9 @@ export default function Requirements() {
 
   const [assignedList, setAssignedList] = useState([]);
 
-  // -----------------------------------
+  // ---------------------------------------------------
   // INITIAL LOAD
-  // -----------------------------------
+  // ---------------------------------------------------
   useEffect(() => {
     dispatch(fetchRequirements());
     dispatch(fetchClients());
@@ -34,9 +34,9 @@ export default function Requirements() {
     else setAssignedList([]);
   }, [requirements]);
 
-  // -----------------------------------
+  // ---------------------------------------------------
   // LOAD RECRUITERS
-  // -----------------------------------
+  // ---------------------------------------------------
   const loadRecruiters = async () => {
     try {
       const res = await fetch("http://localhost:5000/get-recruiters");
@@ -47,14 +47,15 @@ export default function Requirements() {
     }
   };
 
-  // -----------------------------------
+  // ---------------------------------------------------
   // LOAD ASSIGNED RECRUITERS
-  // -----------------------------------
+  // ---------------------------------------------------
   const fetchAssignedRecruiters = async (reqList) => {
     try {
       const all = await Promise.all(
         reqList.map(async (req) => {
-          const res = await fetch(`http://localhost:5000/requirements/${req.id}/allocations`
+          const res = await fetch(
+            `http://localhost:5000/requirements/${req.id}/allocations`
           );
 
           if (!res.ok) return [];
@@ -82,9 +83,9 @@ export default function Requirements() {
   const canCreate = ["ADMIN", "DELIVERY_MANAGER"].includes(user?.role);
   const canAssign = ["ADMIN", "DELIVERY_MANAGER"].includes(user?.role);
 
-  // -----------------------------------
-  // ASSIGN RECRUITER SAVE
-  // -----------------------------------
+  // ---------------------------------------------------
+  // ASSIGN RECRUITER
+  // ---------------------------------------------------
   const handleAssignConfirm = async () => {
     if (!selectedReq || !selectedRecruiter) return;
 
@@ -135,14 +136,15 @@ export default function Requirements() {
     }
   };
 
-  // -----------------------------------
-  // DELETE REQUIREMENT INSTANTLY
-  // -----------------------------------
+  // ---------------------------------------------------
+  // DELETE REQUIREMENT
+  // ---------------------------------------------------
   const handleDelete = async (req) => {
     if (!window.confirm(`Delete ${req.title}?`)) return;
 
     try {
-      const res = await fetch(`http://localhost:5000/delete-requirement/${req.id}`,
+      const res = await fetch(
+        `http://localhost:5000/delete-requirement/${req.id}`,
         { method: "DELETE" }
       );
 
@@ -171,6 +173,9 @@ export default function Requirements() {
     }
   };
 
+  // ---------------------------------------------------
+  // REFRESH ALL DATA
+  // ---------------------------------------------------
   const refreshAllData = useCallback(async () => {
     try {
       const action = await dispatch(fetchRequirements());
@@ -190,9 +195,9 @@ export default function Requirements() {
     ? requirements.filter((r) => r.client_id === Number(selectedClient))
     : requirements;
 
-  // -----------------------------------
-  // RETURN UI
-  // -----------------------------------
+  // ---------------------------------------------------
+  // UI
+  // ---------------------------------------------------
   return (
     <div className="max-w-7xl mx-auto p-6">
       {/* HEADER */}
@@ -236,6 +241,7 @@ export default function Requirements() {
                 <th className="p-2 text-left">Location</th>
                 <th className="p-2 text-left">Experience</th>
                 <th className="p-2 text-left">Skills</th>
+                <th className="p-2 text-left">CTC</th>
                 <th className="p-2 text-left">Client</th>
                 <th className="p-2 text-left">Created By</th>
                 <th className="p-2 text-center">Status</th>
@@ -250,9 +256,11 @@ export default function Requirements() {
                   <td className="p-2">{req.location}</td>
                   <td className="p-2">{req.experience_required} yrs</td>
                   <td className="p-2">{req.skills_required}</td>
+                  <td className="p-2">{req.ctc_range}</td>
                   <td className="p-2">
                     {clients.find((c) => c.id === req.client_id)?.name || "--"}
                   </td>
+
                   <td className="p-2">{req.created_by}</td>
 
                   <td className="p-2 text-center">
@@ -262,22 +270,26 @@ export default function Requirements() {
                   </td>
 
                   <td className="p-2 text-center">
-                    <button
-                      className="bg-blue-600 text-white px-3 py-1 rounded text-xs mr-2"
-                      onClick={() => {
-                        setSelectedReq(req);
-                        setShowAssignModal(true);
-                      }}
-                    >
-                      Assign
-                    </button>
+                    {canAssign && (
+                      <button
+                        className="bg-blue-600 text-white px-3 py-1 rounded text-xs mr-2"
+                        onClick={() => {
+                          setSelectedReq(req);
+                          setShowAssignModal(true);
+                        }}
+                      >
+                        Assign
+                      </button>
+                    )}
 
-                    <button
-                      className="bg-red-600 text-white px-3 py-1 rounded text-xs"
-                      onClick={() => handleDelete(req)}
-                    >
-                      Delete
-                    </button>
+                    {canCreate && (
+                      <button
+                        className="bg-red-600 text-white px-3 py-1 rounded text-xs"
+                        onClick={() => handleDelete(req)}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
