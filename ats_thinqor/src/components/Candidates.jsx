@@ -28,6 +28,7 @@ export default function CandidateApplicationUI() {
 
   const [requirementsOptions, setRequirementsOptions] = useState([]);
   const [requirementsLoading, setRequirementsLoading] = useState(false);
+  
 
   const recruiterIdFromQuery = searchParams.get("recruiterId");
   const createdByUserId = recruiterIdFromQuery
@@ -612,69 +613,151 @@ export default function CandidateApplicationUI() {
       )}
 
       {/* Tracker Modal */}
-      {trackerModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 relative max-h-[90vh] overflow-y-auto">
-            <button className="absolute right-4 top-4 text-gray-500 hover:text-gray-700 text-xl" onClick={() => setTrackerModalOpen(false)}>✕</button>
+{/* Tracker Modal */}
+{trackerModalOpen && (
+  <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-8 relative max-h-[90vh] overflow-y-auto">
 
-            <h3 className="text-2xl font-bold mb-6 text-gray-800">Candidate Tracker</h3>
+      {/* Close Button */}
+      <button
+        onClick={() => setTrackerModalOpen(false)}
+        className="absolute right-4 top-4 text-gray-500 hover:text-gray-800 text-2xl"
+      >
+        ✕
+      </button>
 
-            {trackerLoading ? (
-              <p className="text-center py-10 text-gray-500">Loading tracker details...</p>
-            ) : trackerData.length === 0 ? (
-              <p className="text-center py-10 text-gray-500">No active tracking found for this candidate. Screen them against a requirement first.</p>
-            ) : (
-              <div className="space-y-8">
-                {trackerData.map((item, idx) => (
-                  <div key={idx} className="border rounded-xl p-6 bg-gray-50 shadow-sm">
-                    <div className="flex justify-between items-start mb-4 border-b pb-4">
-                      <div>
-                        <h4 className="text-xl font-semibold text-indigo-700">{item.requirement.title}</h4>
-                        <p className="text-sm text-gray-600">{item.requirement.client_name} • {item.requirement.no_of_rounds} Rounds</p>
-                      </div>
-                      <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold">ID: {item.requirement.id}</span>
-                    </div>
+      {/* Header */}
+      <h3 className="text-3xl font-bold mb-10 text-gray-900 border-b pb-4">
+        Interview Progress Tracking
+      </h3>
 
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm text-left">
-                        <thead className="text-xs text-gray-700 uppercase bg-gray-200">
-                          <tr>
-                            <th className="px-4 py-3 rounded-l-lg">Stage</th>
-                            <th className="px-4 py-3">Status</th>
-                            <th className="px-4 py-3">Decision</th>
-                            <th className="px-4 py-3 rounded-r-lg">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {item.stages.map((stage) => (
-                            <tr key={stage.stage_id} className="bg-white border-b hover:bg-gray-50">
-                              <td className="px-4 py-3 font-medium text-gray-900">{stage.stage_name}</td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${stage.status === "COMPLETED" ? "bg-green-100 text-green-700" : stage.status === "REJECTED" ? "bg-red-100 text-red-700" : stage.status === "IN_PROGRESS" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-700"}`}>
-                                  {stage.status}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">{stage.decision}</td>
-                              <td className="px-4 py-3">
-                                <select className="border rounded px-2 py-1 text-xs" value={stage.status} onChange={(e) => updateStageStatus(trackCandidate.id, item.requirement.id, stage.stage_id, e.target.value, stage.decision)}>
-                                  <option value="PENDING">Pending</option>
-                                  <option value="IN_PROGRESS">In Progress</option>
-                                  <option value="COMPLETED">Completed</option>
-                                  <option value="REJECTED">Rejected</option>
-                                </select>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
+      {/* Loading State */}
+      {trackerLoading ? (
+        <p className="text-center text-gray-500 py-16 text-lg">Loading tracker details...</p>
+      ) : trackerData.length === 0 ? (
+        <p className="text-center text-gray-500 py-16 text-lg">
+          No active tracking found for this candidate.
+        </p>
+      ) : (
+        <div className="space-y-14">
+
+          {trackerData.map((item, idx) => (
+            <div
+              key={idx}
+              className="bg-gray-50 rounded-2xl border p-8 shadow-sm"
+            >
+              {/* Requirement Header */}
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h4 className="text-2xl font-semibold text-gray-800">
+                    {item.requirement.title}
+                  </h4>
+                  <p className="text-sm text-gray-500">
+                    {item.requirement.client_name} • {item.requirement.no_of_rounds} Rounds
+                  </p>
+                </div>
+                <span className="bg-indigo-100 text-indigo-700 px-4 py-1 rounded-full font-semibold text-xs">
+                  ID: {item.requirement.id}
+                </span>
               </div>
-            )}
-          </div>
+
+              {/* Timeline */}
+              <div className="border-l-2 border-gray-300 ml-5 space-y-10">
+                {item.stages.map((stage, index) => {
+                  const isActive = stage.status === "IN_PROGRESS";
+                  const isCompleted = stage.status === "COMPLETED";
+                  const isRejected = stage.status === "REJECTED";
+
+                  const dotColor = isCompleted
+                    ? "bg-green-500"
+                    : isRejected
+                    ? "bg-red-500"
+                    : isActive
+                    ? "bg-blue-500"
+                    : "bg-gray-400";
+
+                  const cardBorder =
+                    isCompleted
+                      ? "border-green-300"
+                      : isRejected
+                      ? "border-red-300"
+                      : isActive
+                      ? "border-blue-300"
+                      : "border-gray-200";
+
+                  return (
+                    <div key={stage.stage_id} className="relative pl-10">
+
+                      {/* Timeline Dot */}
+                      <div
+                        className={`absolute left-[-13px] top-1 w-6 h-6 rounded-full border-4 border-white shadow ${dotColor}`}
+                      ></div>
+
+                      {/* Stage Card */}
+                      <div
+                        className={`bg-white rounded-xl border ${cardBorder} p-5 shadow-sm transition`}
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <h5 className="text-lg font-semibold text-gray-800">
+                            {stage.stage_name}
+                          </h5>
+
+                          {/* Status Badge */}
+                          <span
+                            className={`
+                              px-3 py-1 text-xs font-semibold rounded-full
+                              ${
+                                isCompleted
+                                  ? "bg-green-100 text-green-700"
+                                  : isRejected
+                                  ? "bg-red-100 text-red-700"
+                                  : isActive
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-gray-100 text-gray-700"
+                              }
+                            `}
+                          >
+                            {stage.status}
+                          </span>
+                        </div>
+
+                        {/* Stage Decision */}
+                        <p className="text-gray-600 text-sm mb-4">
+                          {stage.decision || "No decision provided"}
+                        </p>
+
+                        {/* Update Dropdown */}
+                        <select
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          value={stage.status}
+                          onChange={(e) =>
+                            updateStageStatus(
+                              trackCandidate.id,
+                              item.requirement.id,
+                              stage.stage_id,
+                              e.target.value,
+                              stage.decision
+                            )
+                          }
+                        >
+                          <option value="PENDING">Pending</option>
+                          <option value="IN_PROGRESS">In Progress</option>
+                          <option value="COMPLETED">Completed</option>
+                          <option value="REJECTED">Rejected</option>
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
+    </div>
+  </div>
+)}
+
     </div>
   );
 }
