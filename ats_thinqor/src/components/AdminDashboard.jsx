@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { getUsers, createUser, clearMessages } from "../auth/authSlice";
+import { useNavigate } from "react-router-dom";
 
 import {
   Users,
@@ -39,6 +40,7 @@ export default function AdminDashboard() {
     role: "RECRUITER",
     password: "",
   });
+  let navigate = useNavigate();
 
   /* Fetch Users */
   useEffect(() => {
@@ -121,7 +123,7 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b py-6 px-8 flex items-center justify-between">
-        <div>
+        <div className="pl-32">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text">
             Admin Dashboard
           </h1>
@@ -131,7 +133,7 @@ export default function AdminDashboard() {
         </div>
 
         <div className="flex gap-4">
-          <button className="border px-6 py-3 rounded-xl flex items-center gap-2">
+          <button className="border px-6 py-3 rounded-xl flex items-center gap-2" onClick={() => navigate("/reports")}>
             <FileBarChart className="w-5 h-5" />
             Reports
           </button>
