@@ -19,7 +19,7 @@ except ImportError:
 
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}}, supports_credentials=True)
 app.register_blueprint(reports_bp)
 
 # -------------------------------------
@@ -199,8 +199,10 @@ def initialize_database():
                     requirement_id VARCHAR(50),
                     stage_id BIGINT,
                     stage_name VARCHAR(255),
-                    status ENUM('PENDING','IN_PROGRESS','COMPLETED','REJECTED') DEFAULT 'PENDING',
+                    status ENUM('PENDING','IN_PROGRESS','COMPLETED','REJECTED','REVIEW_REQUIRED') DEFAULT 'PENDING',
                     decision ENUM('NONE','MOVE_NEXT','HOLD','REJECT') DEFAULT 'NONE',
+                    manual_decision ENUM('NONE','MOVE_NEXT','HOLD','REJECT') DEFAULT 'NONE',
+                    category VARCHAR(50),
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     UNIQUE KEY uniq_progress_stage (candidate_id, requirement_id, stage_id),
                     FOREIGN KEY (candidate_id) REFERENCES candidates(id),
@@ -237,6 +239,22 @@ def initialize_database():
                 except Exception as e:
                     print(f"   ❌ Error adding decision: {e}")
 
+            cursor.execute("SHOW COLUMNS FROM candidate_progress LIKE 'manual_decision'")
+            if not cursor.fetchone():
+                print("   -> Adding 'manual_decision' column...")
+                try:
+                    cursor.execute("ALTER TABLE candidate_progress ADD COLUMN manual_decision ENUM('NONE','MOVE_NEXT','HOLD','REJECT') DEFAULT 'NONE'")
+                except Exception as e:
+                    print(f"   ❌ Error adding manual_decision: {e}")
+
+            cursor.execute("SHOW COLUMNS FROM candidate_progress LIKE 'category'")
+            if not cursor.fetchone():
+                print("   -> Adding 'category' column...")
+                try:
+                    cursor.execute("ALTER TABLE candidate_progress ADD COLUMN category VARCHAR(50)")
+                except Exception as e:
+                    print(f"   ❌ Error adding category: {e}")
+
             # Fix Unique Key for candidate_progress
             print("   -> Checking unique key constraints...")
             try:
@@ -266,6 +284,19 @@ def initialize_database():
                 red_flags TEXT,
                 model_version VARCHAR(50),
                 status ENUM('PENDING','DONE','ERROR') DEFAULT 'PENDING',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+                FOREIGN KEY (requirement_id) REFERENCES requirements(id)
+            );
+        """)
+
+        # ---------------- ASSESSMENT QUEUE ----------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS assesment_queue (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                candidate_id INT NOT NULL,
+                requirement_id VARCHAR(64) NOT NULL,
+                status VARCHAR(32) DEFAULT 'PENDING',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (candidate_id) REFERENCES candidates(id),
                 FOREIGN KEY (requirement_id) REFERENCES requirements(id)
@@ -1654,13 +1685,45 @@ def delete_requirement(req_id):
         if not result:
             return jsonify({"error": "Requirement not found"}), 404
 
-        # Delete allocations related to this requirement
+        # Delete related records in the correct order (child tables first)
+        
+        # 1. Delete from candidate_progress (references requirement_id and stage_id)
+        cursor.execute(
+            "DELETE FROM candidate_progress WHERE requirement_id = %s",
+            (req_id,)
+        )
+        
+        # 2. Delete from candidate_screening (references requirement_id)
+        cursor.execute(
+            "DELETE FROM candidate_screening WHERE requirement_id = %s",
+            (req_id,)
+        )
+        
+        # 3. Delete from assesment_queue (references requirement_id)
+        cursor.execute(
+            "DELETE FROM assesment_queue WHERE requirement_id = %s",
+            (req_id,)
+        )
+        
+        # 4. Delete from interviews (references requirement_id)
+        cursor.execute(
+            "DELETE FROM interviews WHERE requirement_id = %s",
+            (req_id,)
+        )
+        
+        # 5. Delete from requirement_stages (references requirement_id)
+        cursor.execute(
+            "DELETE FROM requirement_stages WHERE requirement_id = %s",
+            (req_id,)
+        )
+        
+        # 6. Delete from requirement_allocations (references requirement_id)
         cursor.execute(
             "DELETE FROM requirement_allocations WHERE requirement_id = %s",
             (req_id,)
         )
 
-        # Delete requirement
+        # 7. Finally, delete the requirement itself
         cursor.execute(
             "DELETE FROM requirements WHERE id = %s",
             (req_id,)
@@ -1668,14 +1731,17 @@ def delete_requirement(req_id):
 
         conn.commit()
 
-        return jsonify({"message": "Requirement deleted successfully"}), 200
+        return jsonify({"message": "Requirement and all related records deleted successfully"}), 200
 
     except Exception as e:
+        conn.rollback()
+        print(f"❌ Error deleting requirement: {e}")
         return jsonify({"error": str(e)}), 500
 
     finally:
         cursor.close()
         conn.close()
+
 
 @app.route('/create-client', methods=['POST'])
 def create_client():
@@ -2009,88 +2075,41 @@ def get_reports_stats():
     except Exception as e:
         print(f"❌ Error fetching report stats: {e}")
         return jsonify({"error": str(e)}), 500
-# ----------------------------
-# Get all stages
-# ----------------------------
-@app.route("/api/stages", methods=["GET"])
-def get_stages():
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT stage_name FROM tracker_stages ORDER BY stage_order ASC")
-        stages = [row[0] for row in cursor.fetchall()]
-        return jsonify(stages), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
 
-# ----------------------------
-# Get candidate progress
-# ----------------------------
+
+
 @app.route("/api/candidate_progress", methods=["GET"])
-def candidate_progress():
+def get_candidate_progress():
     conn = get_db_connection()
     if not conn:
         return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
+
     try:
-        stages_param = request.args.get("stages")
-        if stages_param:
-            stages = tuple(stage.strip() for stage in stages_param.split(","))
-        else:
-            stages = None
+        cursor = conn.cursor(dictionary=True)
 
         sql = """
-            SELECT cp.id, cp.candidate_id, c.name AS candidate_name,
-                   cp.requirement_id, cp.category, cp.current_stage,
-                   cp.status, cp.manual_decision, cp.updated_at
+            SELECT cp.id, cp.candidate_id, cp.requirement_id, cp.stage_name,
+                   cp.status, c.name AS candidate_name,
+                   rs.stage_name
             FROM candidate_progress cp
             LEFT JOIN candidates c ON cp.candidate_id = c.id
-            WHERE cp.status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED')
+            LEFT JOIN requirement_stages rs ON cp.stage_id = rs.id
+            WHERE cp.id IN (
+                SELECT MAX(id)
+                FROM candidate_progress
+                GROUP BY candidate_id
+            )
+            ORDER BY cp.id
         """
-        if stages:
-            placeholders = ",".join(["%s"] * len(stages))
-            sql += f" AND cp.current_stage IN ({placeholders})"
-            cursor.execute(sql, stages)
-        else:
-            cursor.execute(sql)
 
+        cursor.execute(sql)
         rows = cursor.fetchall()
         return jsonify(rows), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
 
-# ----------------------------
-# Update candidate stage
-# ----------------------------
-@app.route("/api/update_stage/<int:progress_id>", methods=["PUT"])
-def update_stage(progress_id):
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor()
-    try:
-        data = request.json
-        new_stage = data.get("new_stage")
-        if not new_stage:
-            return jsonify({"error": "new_stage is required"}), 400
-
-        # Update the candidate_progress
-        cursor.execute(
-            "UPDATE candidate_progress SET current_stage=%s WHERE id=%s",
-            (new_stage, progress_id)
-        )
-        conn.commit()
-        return jsonify({"message": "Stage updated successfully"}), 200
     except Exception as e:
+        print("Error fetching candidate progress:", e)
         return jsonify({"error": str(e)}), 500
+
     finally:
         cursor.close()
         conn.close()

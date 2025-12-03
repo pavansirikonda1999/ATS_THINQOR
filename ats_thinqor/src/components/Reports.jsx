@@ -1,76 +1,29 @@
 import React, { useEffect, useState } from "react";
 import { ArrowLeft, Download, ChevronRight, BarChart2, PieChart, Users, FileText, Briefcase } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts';
+import { useDispatch, useSelector } from "react-redux";
+import { fetchReportClients, fetchReportRequirements, fetchReportStats } from "../auth/authSlice";
 
 const COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 
 export default function Reports() {
+    const dispatch = useDispatch();
+    const { reportClients, reportRequirements, reportStats, loading, error } = useSelector((state) => state.auth);
+
     const [view, setView] = useState('CLIENTS'); // CLIENTS, REQUIREMENTS, STATS
     const [selectedClient, setSelectedClient] = useState(null);
     const [selectedReq, setSelectedReq] = useState(null);
 
-    const [listData, setListData] = useState([]); // For clients or requirements list
-    const [statsData, setStatsData] = useState(null); // For specific requirement stats
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState("");
-
     // Fetch Clients
-    const fetchClients = () => {
-        setLoading(true);
-        fetch("http://localhost:5001/api/reports/clients")
-            .then(res => res.json())
-            .then(data => {
-                if (data.error) throw new Error(data.error);
-                setListData(data);
-                setLoading(false);
-            })
-            .catch(err => {
-                setError(err.message);
-                setLoading(false);
-            });
-    };
-
-    // Fetch Requirements for Client
-    const fetchRequirements = (clientId) => {
-        setLoading(true);
-        fetch(`http://localhost:5001/api/reports/client/${clientId}/requirements`)
-            .then(res => res.json())
-            .then(data => {
-                if (data.error) throw new Error(data.error);
-                setListData(data);
-                setLoading(false);
-            })
-            .catch(err => {
-                setError(err.message);
-                setLoading(false);
-            });
-    };
-
-    // Fetch Stats for Requirement
-    const fetchStats = (reqId) => {
-        setLoading(true);
-        fetch(`http://localhost:5001/api/reports/requirement/${reqId}/stats`)
-            .then(res => res.json())
-            .then(data => {
-                if (data.error) throw new Error(data.error);
-                setStatsData(data);
-                setLoading(false);
-            })
-            .catch(err => {
-                setError(err.message);
-                setLoading(false);
-            });
-    };
-
     useEffect(() => {
         if (view === 'CLIENTS') {
-            fetchClients();
+            dispatch(fetchReportClients());
         } else if (view === 'REQUIREMENTS' && selectedClient) {
-            fetchRequirements(selectedClient.id);
+            dispatch(fetchReportRequirements(selectedClient.id));
         } else if (view === 'STATS' && selectedReq) {
-            fetchStats(selectedReq.id);
+            dispatch(fetchReportStats(selectedReq.id));
         }
-    }, [view, selectedClient, selectedReq]);
+    }, [view, selectedClient, selectedReq, dispatch]);
 
     const handleClientClick = (client) => {
         setSelectedClient(client);
@@ -85,14 +38,15 @@ export default function Reports() {
     const handleBack = () => {
         if (view === 'STATS') {
             setView('REQUIREMENTS');
-            setStatsData(null);
             setSelectedReq(null);
         } else if (view === 'REQUIREMENTS') {
             setView('CLIENTS');
             setSelectedClient(null);
-            setListData([]);
         }
     };
+
+    // Determine list data based on view
+    const listData = view === 'CLIENTS' ? reportClients : (view === 'REQUIREMENTS' ? reportRequirements : []);
 
     // --- RENDER HELPERS ---
 
@@ -159,8 +113,8 @@ export default function Reports() {
     );
 
     const renderStats = () => {
-        if (!statsData) return null;
-        const { requirement, stats, total_candidates } = statsData;
+        if (!reportStats) return null;
+        const { requirement, stats, total_candidates } = reportStats;
 
         // Prepare chart data
         // Group by stage_name

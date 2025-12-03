@@ -1,11 +1,9 @@
 import { useState } from "react";
-import { useSelector } from "react-redux";
-import axios from "axios";
-
-const API_URL = "http://localhost:5001";
+import { useSelector, useDispatch } from "react-redux";
+import { sendAiMessage } from "../auth/authSlice";
 
 export default function AiChat() {
-
+	const dispatch = useDispatch();
 	const user = useSelector((s) => s.auth.user);
 	const [input, setInput] = useState("");
 	const [messages, setMessages] = useState([]);
@@ -21,14 +19,17 @@ export default function AiChat() {
 		setMessages(next);
 		setInput("");
 		setLoading(true);
+
 		try {
-			const res = await axios.post(`${API_URL}/api/ai/chat`, { message: content, user }, {
-				headers: { "Content-Type": "application/json" },
-			});
-			const answer = res?.data?.answer || "No response";
-			setMessages([...next, { role: "assistant", content: answer }]);
+			const resultAction = await dispatch(sendAiMessage({ message: content, user }));
+			if (sendAiMessage.fulfilled.match(resultAction)) {
+				const answer = resultAction.payload;
+				setMessages([...next, { role: "assistant", content: answer }]);
+			} else {
+				throw new Error(resultAction.payload || "Request failed");
+			}
 		} catch (err) {
-			setError(err?.response?.data?.answer || err?.message || "Request failed");
+			setError(err.message || "Request failed");
 			setMessages([...next, { role: "assistant", content: "AI request failed." }]);
 		} finally {
 			setLoading(false);

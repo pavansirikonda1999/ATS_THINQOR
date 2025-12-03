@@ -148,7 +148,7 @@ export const deleteRequirement = createAsyncThunk(
   "auth/deleteRequirement",
   async (reqId, { rejectWithValue }) => {
     try {
-      const res = await fetch(`http://localhost:5001/delete-requirement/${reqId}`,
+      const res = await fetch(`${API_URL}/delete-requirement/${reqId}`,
         {
           method: "DELETE",
         }
@@ -274,7 +274,7 @@ export const submitCandidate = createAsyncThunk(
           formData.append(key, value);
         }
       });
-      
+
       const response = await axios.post(`${API_URL}/submit-candidate`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
@@ -300,7 +300,7 @@ export const updateCandidate = createAsyncThunk(
           formData.append(key, value);
         }
       });
-      
+
       const response = await axios.put(`${API_URL}/update-candidate/${id}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
@@ -388,6 +388,169 @@ export const deleteUser = createAsyncThunk(
   }
 );
 
+// ------------------------------------------------------------------
+// REPORTS
+// ------------------------------------------------------------------
+export const fetchReportClients = createAsyncThunk(
+  "reports/fetchClients",
+  async (_, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/reports/clients`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch report clients");
+    }
+  }
+);
+
+export const fetchReportRequirements = createAsyncThunk(
+  "reports/fetchRequirements",
+  async (clientId, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/reports/client/${clientId}/requirements`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch report requirements");
+    }
+  }
+);
+
+export const fetchReportStats = createAsyncThunk(
+  "reports/fetchStats",
+  async (reqId, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/reports/requirement/${reqId}/stats`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch report stats");
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// AI CHAT
+// ------------------------------------------------------------------
+export const sendAiMessage = createAsyncThunk(
+  "ai/sendMessage",
+  async ({ message, user }, { rejectWithValue }) => {
+    try {
+      const res = await axios.post(`${API_URL}/api/ai/chat`, { message, user }, {
+        headers: { "Content-Type": "application/json" },
+      });
+      return res.data.answer || "No response";
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.answer || error.message || "Request failed");
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// AI AUTO FILL REQUIREMENT
+// ------------------------------------------------------------------
+export const autoFillRequirement = createAsyncThunk(
+  "ai/autoFillRequirement",
+  async (jdText, { rejectWithValue }) => {
+    try {
+      const res = await axios.post(`${API_URL}/api/ai/jd-to-requirement`, { jd_text: jdText }, {
+        headers: { "Content-Type": "application/json" },
+      });
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "AI Auto-fill failed");
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// SCREEN CANDIDATE
+// ------------------------------------------------------------------
+export const screenCandidate = createAsyncThunk(
+  "ai/screenCandidate",
+  async ({ candidate_id, requirement_id }, { rejectWithValue }) => {
+    try {
+      const res = await axios.post(`${API_URL}/api/screen-candidate`, { candidate_id, requirement_id }, {
+        headers: { "Content-Type": "application/json" },
+      });
+      return res.data.result || res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Screening failed");
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// CANDIDATE TRACKER
+// ------------------------------------------------------------------
+export const fetchCandidateTracker = createAsyncThunk(
+  "candidates/fetchTracker",
+  async (candidateId, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/candidate-tracker/${candidateId}`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch tracker");
+    }
+  }
+);
+
+export const updateStageStatus = createAsyncThunk(
+  "candidates/updateStageStatus",
+  async (payload, { rejectWithValue }) => {
+    try {
+      const res = await axios.post(`${API_URL}/api/update-stage-status`, payload, {
+        headers: { "Content-Type": "application/json" },
+      });
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to update stage status");
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// FETCH ALLOCATIONS
+// ------------------------------------------------------------------
+export const fetchAllocations = createAsyncThunk(
+  "requirements/fetchAllocations",
+  async (reqList, { rejectWithValue }) => {
+    try {
+      const all = await Promise.all(
+        reqList.map(async (req) => {
+          const res = await fetch(`${API_URL}/requirements/${req.id}/allocations`);
+          if (!res.ok) return [];
+          const data = await res.json();
+          return data.map((item) => ({
+            id: item.id,
+            requirementId: req.id,
+            requirementTitle: req.title,
+            recruiter: item.recruiter_name,
+            assignedDate: item.created_at ? new Date(item.created_at).toLocaleString() : "-",
+            status: item.status || "Assigned",
+          }));
+        })
+      );
+      return all.flat();
+    } catch (error) {
+      return rejectWithValue(error.message);
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// FETCH CANDIDATE PROGRESS (INTERVIEWS)
+// ------------------------------------------------------------------
+export const fetchCandidateProgress = createAsyncThunk(
+  "candidates/fetchProgress",
+  async (_, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/candidate_progress`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch progress");
+    }
+  }
+);
+
 
 // ------------------------------------------------------------------
 // INITIAL STATE
@@ -402,6 +565,14 @@ const initialState = {
   error: null,
   successMessage: null,
   recruiters: [],
+  allocations: [],
+  interviews: [],
+  reportClients: [],
+  reportRequirements: [],
+  reportStats: null,
+  aiMessages: [],
+  trackerData: [],
+  screeningResult: null,
 };
 
 // ------------------------------------------------------------------
@@ -483,131 +654,227 @@ const authSlice = createSlice({
       // CREATE CLIENT
       .addCase(createClient.pending, (s) => { s.loading = true; })
       .addCase(createClient.fulfilled, (s, a) => {
-      s.loading = false;
-      s.successMessage = "Client created successfully!";
+        s.loading = false;
+        s.successMessage = "Client created successfully!";
       })
       .addCase(createClient.rejected, (s, a) => {
-      s.loading = false;
-      s.error = a.payload;
+        s.loading = false;
+        s.error = a.payload;
       })
 
-     // FETCH CLIENTS
-    .addCase(fetchClients.pending, (s) => { s.loading = true; })
-    .addCase(fetchClients.fulfilled, (s, a) => {
-    s.loading = false;
-    s.clients = a.payload;
-    })
-    .addCase(fetchClients.rejected, (s, a) => {
-    s.loading = false;
-    s.error = a.payload;
-    })
-    .addCase(updateClient.pending, (s) => { s.loading = true; })
+      // FETCH CLIENTS
+      .addCase(fetchClients.pending, (s) => { s.loading = true; })
+      .addCase(fetchClients.fulfilled, (s, a) => {
+        s.loading = false;
+        s.clients = a.payload;
+      })
+      .addCase(fetchClients.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+      .addCase(updateClient.pending, (s) => { s.loading = true; })
       .addCase(updateClient.fulfilled, (s, a) => { s.loading = false; s.clients = s.clients.map(c => c.id === a.payload.id ? a.payload : c); s.successMessage = "Client updated!"; })
       .addCase(updateClient.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
 
       .addCase(deleteClient.pending, (s) => { s.loading = true; })
       .addCase(deleteClient.fulfilled, (s, a) => { s.loading = false; s.clients = s.clients.filter(c => c.id !== a.payload.id); s.successMessage = a.payload.message || "Client deleted!"; })
       .addCase(deleteClient.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
-    .addCase(createRequirement.pending, (s) => { s.loading = true; })
-    .addCase(createRequirement.fulfilled, (s) => { s.loading = false; s.successMessage = "Requirement created"; })
-    .addCase(createRequirement.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
+      .addCase(createRequirement.pending, (s) => { s.loading = true; })
+      .addCase(createRequirement.fulfilled, (s) => { s.loading = false; s.successMessage = "Requirement created"; })
+      .addCase(createRequirement.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
 
-    .addCase(fetchRequirements.pending, (s) => { s.loading = true; })
-    .addCase(fetchRequirements.fulfilled, (s, a) => { s.loading = false; s.requirements = a.payload; })
-    .addCase(fetchRequirements.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
+      .addCase(fetchRequirements.pending, (s) => { s.loading = true; })
+      .addCase(fetchRequirements.fulfilled, (s, a) => { s.loading = false; s.requirements = a.payload; })
+      .addCase(fetchRequirements.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
 
-    .addCase(assignRequirement.pending, (s) => { s.loading = true; })
-    .addCase(assignRequirement.fulfilled, (s) => { s.loading = false; s.successMessage = "Requirement assigned"; })
-    .addCase(assignRequirement.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
+      .addCase(assignRequirement.pending, (s) => { s.loading = true; })
+      .addCase(assignRequirement.fulfilled, (s) => { s.loading = false; s.successMessage = "Requirement assigned"; })
+      .addCase(assignRequirement.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
 
-    // ---------- USERS LIST ----------
-    .addCase(fetchUsers.pending, (state) => { state.loading = true; state.error = null; })
-    .addCase(fetchUsers.fulfilled, (state, action) => { state.loading = false; state.usersList = action.payload; })
-    .addCase(fetchUsers.rejected, (state, action) => { state.loading = false; state.error = action.payload; })
+      // ---------- USERS LIST ----------
+      .addCase(fetchUsers.pending, (state) => { state.loading = true; state.error = null; })
+      .addCase(fetchUsers.fulfilled, (state, action) => { state.loading = false; state.usersList = action.payload; })
+      .addCase(fetchUsers.rejected, (state, action) => { state.loading = false; state.error = action.payload; })
 
-    // ADD USER
-    .addCase(addUser.pending, (state) => { state.loading = true; state.error = null; })
-    .addCase(addUser.fulfilled, (state, action) => { state.loading = false; state.successMessage = action.payload.message; })
-    .addCase(addUser.rejected, (state, action) => { state.loading = false; state.error = action.payload; })
+      // ADD USER
+      .addCase(addUser.pending, (state) => { state.loading = true; state.error = null; })
+      .addCase(addUser.fulfilled, (state, action) => { state.loading = false; state.successMessage = action.payload.message; })
+      .addCase(addUser.rejected, (state, action) => { state.loading = false; state.error = action.payload; })
 
-    // UPDATE USER
-    .addCase(updateUser.pending, (state) => { state.loading = true; state.error = null; })
-    .addCase(updateUser.fulfilled, (state, action) => {
-      state.loading = false;
-      state.successMessage = action.payload.message;
-      state.usersList = state.usersList.map(u =>
-        u.id === action.payload.id ? { ...u, ...action.payload } : u
-      );
-    })
-    .addCase(updateUser.rejected, (state, action) => { state.loading = false; state.error = action.payload; })
+      // UPDATE USER
+      .addCase(updateUser.pending, (state) => { state.loading = true; state.error = null; })
+      .addCase(updateUser.fulfilled, (state, action) => {
+        state.loading = false;
+        state.successMessage = action.payload.message;
+        state.usersList = state.usersList.map(u =>
+          u.id === action.payload.id ? { ...u, ...action.payload } : u
+        );
+      })
+      .addCase(updateUser.rejected, (state, action) => { state.loading = false; state.error = action.payload; })
 
-    // DELETE USER
-    .addCase(deleteUser.pending, (state) => { state.loading = true; state.error = null; })
-    .addCase(deleteUser.fulfilled, (state, action) => {
-      state.loading = false;
-      state.usersList = state.usersList.filter(u => u.id !== action.payload.id);
-      state.successMessage = action.payload.message;
-    })
-    .addCase(deleteUser.rejected, (state, action) => { state.loading = false; state.error = action.payload; })
-    // FETCH CANDIDATES
-    .addCase(fetchCandidates.pending, (s) => { s.loading = true; s.error = null; })
-    .addCase(fetchCandidates.fulfilled, (s, a) => {
-      s.loading = false;
-      s.candidates = a.payload;
-    })
-    .addCase(fetchCandidates.rejected, (s, a) => {
-      s.loading = false;
-      s.error = a.payload;
-    })
+      // DELETE USER
+      .addCase(deleteUser.pending, (state) => { state.loading = true; state.error = null; })
+      .addCase(deleteUser.fulfilled, (state, action) => {
+        state.loading = false;
+        state.usersList = state.usersList.filter(u => u.id !== action.payload.id);
+        state.successMessage = action.payload.message;
+      })
+      .addCase(deleteUser.rejected, (state, action) => { state.loading = false; state.error = action.payload; })
+      // FETCH CANDIDATES
+      .addCase(fetchCandidates.pending, (s) => { s.loading = true; s.error = null; })
+      .addCase(fetchCandidates.fulfilled, (s, a) => {
+        s.loading = false;
+        s.candidates = a.payload;
+      })
+      .addCase(fetchCandidates.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
 
-    // SUBMIT CANDIDATE
-    .addCase(submitCandidate.pending, (s) => { s.loading = true; s.error = null; })
-    .addCase(submitCandidate.fulfilled, (s, a) => {
-      s.loading = false;
-      s.successMessage = a.payload.message || "Candidate submitted successfully!";
-    })
-    .addCase(submitCandidate.rejected, (s, a) => {
-      s.loading = false;
-      s.error = a.payload;
-    })
+      // SUBMIT CANDIDATE
+      .addCase(submitCandidate.pending, (s) => { s.loading = true; s.error = null; })
+      .addCase(submitCandidate.fulfilled, (s, a) => {
+        s.loading = false;
+        s.successMessage = a.payload.message || "Candidate submitted successfully!";
+      })
+      .addCase(submitCandidate.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
 
-    .addCase(deleteRequirement.fulfilled, (state, action) => {
-      state.requirements = state.requirements.filter(
-        (req) => req.id !== action.payload
-      );
-    })
-    .addCase(deleteRequirement.rejected, (state, action) => {
-      state.error = action.payload || "Failed to delete requirement";
-    })
+      .addCase(deleteRequirement.fulfilled, (state, action) => {
+        state.requirements = state.requirements.filter(
+          (req) => req.id !== action.payload
+        );
+      })
+      .addCase(deleteRequirement.rejected, (state, action) => {
+        state.error = action.payload || "Failed to delete requirement";
+      })
 
-    // UPDATE CANDIDATE
-    .addCase(updateCandidate.pending, (s) => { s.loading = true; s.error = null; })
-    .addCase(updateCandidate.fulfilled, (s, a) => {
-      s.loading = false;
-      s.successMessage = a.payload.message || "Candidate updated successfully!";
-    })
-    .addCase(updateCandidate.rejected, (s, a) => {
-      s.loading = false;
-      s.error = a.payload;
-    })
-    .addCase(fetchRecruiters.fulfilled, (state, action) => {
-    state.recruiters = action.payload;
-    })
-  .addCase(fetchRecruiters.rejected, (state, action) => {
-    state.loading = false;
-    state.error = action.payload;
-  })
-    // DELETE CANDIDATE
-    .addCase(deleteCandidate.pending, (s) => { s.loading = true; s.error = null; })
-    .addCase(deleteCandidate.fulfilled, (s, a) => {
-      s.loading = false;
-      s.candidates = s.candidates.filter(c => c.id !== a.payload.id);
-      s.successMessage = a.payload.message || "Candidate deleted successfully!";
-    })
-    .addCase(deleteCandidate.rejected, (s, a) => {
-      s.loading = false;
-      s.error = a.payload;
-    });
+      // UPDATE CANDIDATE
+      .addCase(updateCandidate.pending, (s) => { s.loading = true; s.error = null; })
+      .addCase(updateCandidate.fulfilled, (s, a) => {
+        s.loading = false;
+        s.successMessage = a.payload.message || "Candidate updated successfully!";
+      })
+      .addCase(updateCandidate.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+      .addCase(fetchRecruiters.fulfilled, (state, action) => {
+        state.recruiters = action.payload;
+      })
+      .addCase(fetchRecruiters.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+      // DELETE CANDIDATE
+      .addCase(deleteCandidate.pending, (s) => { s.loading = true; s.error = null; })
+      .addCase(deleteCandidate.fulfilled, (s, a) => {
+        s.loading = false;
+        s.candidates = s.candidates.filter(c => c.id !== a.payload.id);
+        s.successMessage = a.payload.message || "Candidate deleted successfully!";
+      })
+      .addCase(deleteCandidate.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      // FETCH ALLOCATIONS
+      .addCase(fetchAllocations.pending, (s) => { s.loading = true; })
+      .addCase(fetchAllocations.fulfilled, (s, a) => {
+        s.loading = false;
+        s.allocations = a.payload;
+      })
+      .addCase(fetchAllocations.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      // FETCH CANDIDATE PROGRESS
+      .addCase(fetchCandidateProgress.pending, (s) => { s.loading = true; })
+      .addCase(fetchCandidateProgress.fulfilled, (s, a) => {
+        s.loading = false;
+        s.interviews = a.payload;
+      })
+      .addCase(fetchCandidateProgress.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      // REPORTS
+      .addCase(fetchReportClients.pending, (s) => { s.loading = true; })
+      .addCase(fetchReportClients.fulfilled, (s, a) => {
+        s.loading = false;
+        s.reportClients = a.payload;
+      })
+      .addCase(fetchReportClients.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      .addCase(fetchReportRequirements.pending, (s) => { s.loading = true; })
+      .addCase(fetchReportRequirements.fulfilled, (s, a) => {
+        s.loading = false;
+        s.reportRequirements = a.payload;
+      })
+      .addCase(fetchReportRequirements.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      .addCase(fetchReportStats.pending, (s) => { s.loading = true; })
+      .addCase(fetchReportStats.fulfilled, (s, a) => {
+        s.loading = false;
+        s.reportStats = a.payload;
+      })
+      .addCase(fetchReportStats.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      // AI CHAT
+      .addCase(sendAiMessage.pending, (s) => { s.loading = true; })
+      .addCase(sendAiMessage.fulfilled, (s, a) => {
+        s.loading = false;
+        // Messages are handled in component state usually, but we can store them here if needed
+        // For now, we just handle success/loading
+      })
+      .addCase(sendAiMessage.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      // AUTO FILL
+      .addCase(autoFillRequirement.pending, (s) => { s.loading = true; })
+      .addCase(autoFillRequirement.fulfilled, (s) => { s.loading = false; })
+      .addCase(autoFillRequirement.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
+
+      // SCREEN CANDIDATE
+      .addCase(screenCandidate.pending, (s) => { s.loading = true; })
+      .addCase(screenCandidate.fulfilled, (s, a) => {
+        s.loading = false;
+        s.screeningResult = a.payload;
+      })
+      .addCase(screenCandidate.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      // TRACKER
+      .addCase(fetchCandidateTracker.pending, (s) => { s.loading = true; })
+      .addCase(fetchCandidateTracker.fulfilled, (s, a) => {
+        s.loading = false;
+        s.trackerData = Array.isArray(a.payload) ? a.payload : [a.payload];
+      })
+      .addCase(fetchCandidateTracker.rejected, (s, a) => {
+        s.loading = false;
+        s.error = a.payload;
+      })
+
+      .addCase(updateStageStatus.pending, (s) => { s.loading = true; })
+      .addCase(updateStageStatus.fulfilled, (s) => { s.loading = false; s.successMessage = "Stage updated"; })
+      .addCase(updateStageStatus.rejected, (s, a) => { s.loading = false; s.error = a.payload; });
   },
 });
 

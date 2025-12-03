@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useSelector, useDispatch } from "react-redux";
-import { createRequirement, fetchClients } from "../auth/authSlice";
+import { createRequirement, fetchClients, autoFillRequirement } from "../auth/authSlice";
 
 export default function CreateRequirements() {
   const dispatch = useDispatch();
@@ -34,32 +34,25 @@ export default function CreateRequirements() {
     setAiError(null);
 
     try {
-      const res = await fetch("http://localhost:5001/api/ai/jd-to-requirement", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jd_text: jdText }),
-      });
+      const resultAction = await dispatch(autoFillRequirement(jdText));
 
-      const data = await res.json();
-
-      if (data.error) {
-        setAiError(data.error);
-        return alert("AI Error: " + data.error);
-      }
-
-      if (data.suggested_requirement) {
-        // Removed ectc mapping
-        setForm(prev => ({
-          ...prev,
-          title: data.suggested_requirement.title || prev.title,
-          location: data.suggested_requirement.location || prev.location,
-          skills_required: data.suggested_requirement.skills_required || prev.skills_required,
-          experience_required: data.suggested_requirement.experience_required || prev.experience_required,
-          ctc_range: data.suggested_requirement.ctc_range || prev.ctc_range,
-          description: data.suggested_requirement.description || prev.description,
-        }));
-
-        alert("AI Auto-fill complete!");
+      if (autoFillRequirement.fulfilled.match(resultAction)) {
+        const data = resultAction.payload;
+        if (data.suggested_requirement) {
+          setForm(prev => ({
+            ...prev,
+            title: data.suggested_requirement.title || prev.title,
+            location: data.suggested_requirement.location || prev.location,
+            skills_required: data.suggested_requirement.skills_required || prev.skills_required,
+            experience_required: data.suggested_requirement.experience_required || prev.experience_required,
+            ctc_range: data.suggested_requirement.ctc_range || prev.ctc_range,
+            description: data.suggested_requirement.description || prev.description,
+          }));
+          alert("AI Auto-fill complete!");
+        }
+      } else {
+        setAiError(resultAction.payload || "AI Auto-fill failed");
+        alert("AI Error: " + (resultAction.payload || "Unknown error"));
       }
     } catch (err) {
       setAiError(err.message);
@@ -206,7 +199,6 @@ export default function CreateRequirements() {
           className="border p-2 rounded col-span-2 h-24"
         />
 
-        <input name="experience_required" placeholder="Experience (years)" value={form.experience_required} onChange={handleChange} className="border p-2 rounded" />
         <input name="skills_required" placeholder="Skills (comma separated)" value={form.skills_required} onChange={handleChange} className="border p-2 rounded" />
 
         <input name="ctc_range" placeholder="CTC Range" value={form.ctc_range} onChange={handleChange} className="border p-2 rounded" />

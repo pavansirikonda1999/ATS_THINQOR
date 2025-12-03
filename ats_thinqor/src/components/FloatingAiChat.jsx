@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { useSelector } from "react-redux";
-import axios from "axios";
-
-const API_URL = "http://localhost:5001";
+import { useSelector, useDispatch } from "react-redux";
+import { sendAiMessage } from "../auth/authSlice";
 
 export default function FloatingAiChat() {
+	const dispatch = useDispatch();
 	const user = useSelector((s) => s.auth.user);
 	const [isOpen, setIsOpen] = useState(false);
 	const [input, setInput] = useState("");
@@ -32,14 +31,17 @@ export default function FloatingAiChat() {
 		setMessages(next);
 		setInput("");
 		setLoading(true);
+
 		try {
-			const res = await axios.post(`${API_URL}/api/ai/chat`, { message: content, user }, {
-				headers: { "Content-Type": "application/json" },
-			});
-			const answer = res?.data?.answer || "No response";
-			setMessages([...next, { role: "assistant", content: answer }]);
+			const resultAction = await dispatch(sendAiMessage({ message: content, user }));
+			if (sendAiMessage.fulfilled.match(resultAction)) {
+				const answer = resultAction.payload;
+				setMessages([...next, { role: "assistant", content: answer }]);
+			} else {
+				throw new Error(resultAction.payload || "Request failed");
+			}
 		} catch (err) {
-			setError(err?.response?.data?.answer || err?.message || "Request failed");
+			setError(err.message || "Request failed");
 			setMessages([...next, { role: "assistant", content: "AI request failed." }]);
 		} finally {
 			setLoading(false);
@@ -110,11 +112,10 @@ export default function FloatingAiChat() {
 									className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
 								>
 									<div
-										className={`max-w-[80%] rounded-lg px-4 py-2 ${
-											m.role === "user"
+										className={`max-w-[80%] rounded-lg px-4 py-2 ${m.role === "user"
 												? "bg-indigo-600 text-white"
 												: "bg-white text-gray-800 border border-gray-200"
-										}`}
+											}`}
 									>
 										<p className="text-sm whitespace-pre-wrap">{m.content}</p>
 									</div>
