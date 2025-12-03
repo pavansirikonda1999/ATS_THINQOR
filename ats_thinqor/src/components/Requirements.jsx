@@ -7,22 +7,17 @@ export default function Requirements() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
-  const { user, requirements, clients, loading } = useSelector(
-    (state) => state.auth
-  );
+  const { user, requirements, clients, loading } = useSelector((state) => state.auth);
 
   const [selectedClient, setSelectedClient] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedRecruiter, setSelectedRecruiter] = useState("");
   const [selectedReq, setSelectedReq] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
 
   const [recruiters, setRecruiters] = useState([]);
-  const [selectedRecruiter, setSelectedRecruiter] = useState("");
-
   const [assignedList, setAssignedList] = useState([]);
 
-  // ---------------------------------------------------
-  // INITIAL LOAD
-  // ---------------------------------------------------
   useEffect(() => {
     dispatch(fetchRequirements());
     dispatch(fetchClients());
@@ -34,9 +29,6 @@ export default function Requirements() {
     else setAssignedList([]);
   }, [requirements]);
 
-  // ---------------------------------------------------
-  // LOAD RECRUITERS
-  // ---------------------------------------------------
   const loadRecruiters = async () => {
     try {
       const res = await fetch("http://localhost:5001/get-recruiters");
@@ -47,28 +39,24 @@ export default function Requirements() {
     }
   };
 
-  // ---------------------------------------------------
-  // LOAD ASSIGNED RECRUITERS
-  // ---------------------------------------------------
   const fetchAssignedRecruiters = async (reqList) => {
     try {
       const all = await Promise.all(
         reqList.map(async (req) => {
           const res = await fetch(
-            `http://localhost:5001/requirements/${req.id}/allocations`
+            `http://localhost:5000/requirements/${req.id}/allocations`
           );
 
           if (!res.ok) return [];
 
           const data = await res.json();
+
           return data.map((item) => ({
             id: item.id,
             requirementId: req.id,
             requirementTitle: req.title,
             recruiter: item.recruiter_name,
-            assignedDate: item.created_at
-              ? new Date(item.created_at).toLocaleString()
-              : "-",
+            assignedDate: item.created_at ? new Date(item.created_at).toLocaleString() : "-",
             status: item.status || "Assigned",
           }));
         })
@@ -83,9 +71,6 @@ export default function Requirements() {
   const canCreate = ["ADMIN", "DELIVERY_MANAGER"].includes(user?.role);
   const canAssign = ["ADMIN", "DELIVERY_MANAGER"].includes(user?.role);
 
-  // ---------------------------------------------------
-  // ASSIGN RECRUITER
-  // ---------------------------------------------------
   const handleAssignConfirm = async () => {
     if (!selectedReq || !selectedRecruiter) return;
 
@@ -101,15 +86,12 @@ export default function Requirements() {
       });
 
       const data = await res.json();
-
       if (!res.ok) {
         alert(data.error || "Failed to assign recruiter");
         return;
       }
 
-      const recruiterName =
-        recruiters.find((r) => r.id === parseInt(selectedRecruiter))?.name ||
-        "Unknown";
+      const recruiterName = recruiters.find((r) => r.id === parseInt(selectedRecruiter))?.name || "Unknown";
 
       setAssignedList((prev) => [
         ...prev,
@@ -119,16 +101,13 @@ export default function Requirements() {
           requirementTitle: selectedReq.title,
           recruiter: recruiterName,
           assignedDate: new Date().toLocaleString(),
-          status: "Assigned",
+          status: "ASSIGNED",
         },
       ]);
 
       setShowAssignModal(false);
       setSelectedRecruiter("");
       setSelectedReq(null);
-
-      alert("Recruiter assigned successfully!");
-
       refreshAllData();
     } catch (err) {
       console.error("Assign error:", err);
@@ -136,36 +115,23 @@ export default function Requirements() {
     }
   };
 
-  // ---------------------------------------------------
-  // DELETE REQUIREMENT
-  // ---------------------------------------------------
   const handleDelete = async (req) => {
     if (!window.confirm(`Delete ${req.title}?`)) return;
 
     try {
       const res = await fetch(
-        `http://localhost:5001/delete-requirement/${req.id}`,
+        `http://localhost:5000/delete-requirement/${req.id}`,
         { method: "DELETE" }
       );
 
       const data = await res.json();
-
       if (!res.ok) {
         alert(data.error || "Failed to delete");
         return;
       }
 
-      dispatch({
-        type: "auth/setRequirements",
-        payload: requirements.filter((r) => r.id !== req.id),
-      });
-
-      setAssignedList((prev) =>
-        prev.filter((item) => item.requirementId !== req.id)
-      );
-
-      alert("Requirement deleted!");
-
+      dispatch({ type: "auth/setRequirements", payload: requirements.filter((r) => r.id !== req.id) });
+      setAssignedList((prev) => prev.filter((item) => item.requirementId !== req.id));
       refreshAllData();
     } catch (err) {
       console.error("Delete error:", err);
@@ -173,9 +139,6 @@ export default function Requirements() {
     }
   };
 
-  // ---------------------------------------------------
-  // REFRESH ALL DATA
-  // ---------------------------------------------------
   const refreshAllData = useCallback(async () => {
     try {
       const action = await dispatch(fetchRequirements());
@@ -191,100 +154,102 @@ export default function Requirements() {
     }
   }, [dispatch, requirements]);
 
-  const filteredRequirements = selectedClient
-    ? requirements.filter((r) => r.client_id === Number(selectedClient))
-    : requirements;
+  const filteredRequirements = requirements
+    .filter((r) => (selectedClient ? r.client_id === Number(selectedClient) : true))
+    .filter((r) => r.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // ---------------------------------------------------
-  // UI
-  // ---------------------------------------------------
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div className="max-w-7xl mx-auto p-6 space-y-6">
       {/* HEADER */}
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Requirements</h2>
+      <div>
+        <div className="bg-blue-100 rounded-2xl shadow-sm p-6 mb-6">
+  <h2 className="text-3xl font-bold text-black">Requirements</h2>
+  <p className="text-gray-500 mt-2">
+    Manage and track all your recruitment requirements
+  </p>
+</div>
+
         {canCreate && (
           <button
             onClick={() => navigate("/create-requirement")}
-            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg shadow hover:bg-indigo-700 mb-4"
           >
             + New Requirement
           </button>
         )}
       </div>
 
-      {/* FILTER */}
-      <div className="mb-4">
+      {/* SEARCH + FILTER */}
+      <div className="flex gap-4 items-center mb-4 bg-white p-4 rounded-lg shadow-sm">
+        <input
+          type="text"
+          placeholder="Search requirements by title, skills, location..."
+          className="border px-4 py-2 rounded-lg shadow-sm flex-1"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
         <select
-          className="border px-4 py-2 rounded"
+          className="border px-4 py-2 rounded-lg shadow-sm"
           onChange={(e) => setSelectedClient(e.target.value)}
         >
           <option value="">All Clients</option>
           {clients?.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
+            <option key={c.id} value={c.id}>{c.name}</option>
           ))}
         </select>
+        <button className="bg-gray-100 px-4 py-2 rounded-lg shadow hover:bg-gray-200">More Filters</button>
       </div>
-
-      {/* LOADING */}
-      {loading && <p>Loading...</p>}
 
       {/* REQUIREMENTS TABLE */}
       {!loading && filteredRequirements.length > 0 && (
-        <div className="bg-white shadow rounded overflow-x-auto">
+        <div className="bg-white rounded-lg shadow overflow-hidden">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-100">
+            <thead className="bg-blue-50 text-gray-700">
               <tr>
-                <th className="p-2 text-left">Title</th>
-                <th className="p-2 text-left">Location</th>
-                <th className="p-2 text-left">Experience</th>
-                <th className="p-2 text-left">Skills</th>
-                <th className="p-2 text-left">CTC</th>
-                <th className="p-2 text-left">Client</th>
-                <th className="p-2 text-left">Created By</th>
-                <th className="p-2 text-center">Status</th>
-                <th className="p-2 text-center">Actions</th>
+                <th className="p-3 text-left">Title</th>
+                <th className="p-3 text-left">Location</th>
+                <th className="p-3 text-left">Experience</th>
+                <th className="p-3 text-left">Skills</th>
+                <th className="p-3 text-left">CTC</th>
+                <th className="p-3 text-left">Client</th>
+                <th className="p-3 text-left">Created By</th>
+                <th className="p-3 text-left">Status</th>
+                <th className="p-3 text-center">Actions</th>
               </tr>
             </thead>
-
             <tbody>
               {filteredRequirements.map((req) => (
-                <tr key={req.id} className="border-t">
-                  <td className="p-2">{req.title}</td>
-                  <td className="p-2">{req.location}</td>
-                  <td className="p-2">{req.experience_required} yrs</td>
-                  <td className="p-2">{req.skills_required}</td>
-                  <td className="p-2">{req.ctc_range || "--"}</td>
-                  <td className="p-2">
-                    {clients.find((c) => c.id === req.client_id)?.name || "--"}
+                <tr key={req.id} className="border-t hover:bg-gray-50 transition">
+                  <td className="p-3 font-medium text-blue-500">{req.title}</td>
+                  <td className="p-3">{req.location}</td>
+                  <td className="p-3">{req.experience_required} yrs</td>
+                  <td className="p-3 flex gap-1 flex-wrap">
+                    {req.skills_required.split(",").map((skill, i) => (
+                      <span key={i} className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs">
+                        {skill.trim()}
+                      </span>
+                    ))}
                   </td>
-
-                  <td className="p-2">{req.created_by}</td>
-
-                  <td className="p-2 text-center">
-                    <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">
+                  <td className="p-3">{req.ctc_range || "--"}</td>
+                  <td className="p-3">{clients.find((c) => c.id === req.client_id)?.name || "--"}</td>
+                  <td className="p-3">{req.created_by || "--"}</td>
+                  <td className="p-3">
+                    <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs">
                       {req.status}
                     </span>
                   </td>
-
-                  <td className="p-2 text-center">
+                  <td className="p-3 text-center flex gap-2 justify-center">
                     {canAssign && (
                       <button
-                        className="bg-blue-600 text-white px-3 py-1 rounded text-xs mr-2"
-                        onClick={() => {
-                          setSelectedReq(req);
-                          setShowAssignModal(true);
-                        }}
+                        className="bg-indigo-600 text-white px-3 py-1 rounded text-xs"
+                        onClick={() => { setSelectedReq(req); setShowAssignModal(true); }}
                       >
                         Assign
                       </button>
                     )}
-
                     {canCreate && (
                       <button
-                        className="bg-red-600 text-white px-3 py-1 rounded text-xs"
+                        className="bg-red-500 text-white px-3 py-1 rounded text-xs"
                         onClick={() => handleDelete(req)}
                       >
                         Delete
@@ -310,50 +275,34 @@ export default function Requirements() {
         />
       )}
 
-      {/* ASSIGNED TABLE */}
+      {/* ASSIGNED RECRUITERS TABLE */}
       <AssignedRecruitersTable assignedList={assignedList} />
     </div>
   );
 }
 
-/* ASSIGN MODAL */
-function AssignModal({
-  recruiters,
-  selectedRecruiter,
-  setSelectedRecruiter,
-  selectedReq,
-  setShowAssignModal,
-  handleAssignConfirm,
-}) {
+/* ASSIGN MODAL COMPONENT */
+function AssignModal({ recruiters, selectedRecruiter, setSelectedRecruiter, selectedReq, setShowAssignModal, handleAssignConfirm }) {
   return (
-    <div className="fixed inset-0 bg-black/40 flex justify-center items-center">
-      <div className="bg-white p-6 w-96 rounded shadow">
-        <h2 className="text-lg font-bold mb-4">
-          Assign Recruiter for {selectedReq.title}
-        </h2>
+    <div className="fixed inset-0 bg-black/40 flex justify-center items-center z-50">
+      <div className="bg-white p-6 w-96 rounded-lg shadow-lg">
+        <h2 className="text-lg font-bold mb-4">Assign Recruiter for {selectedReq.title}</h2>
 
         <select
-          className="border px-3 py-2 w-full mb-4 rounded"
+          className="border px-3 py-2 w-full mb-4 rounded-lg"
           value={selectedRecruiter}
           onChange={(e) => setSelectedRecruiter(e.target.value)}
         >
           <option value="">Select Recruiter</option>
           {recruiters.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.name}
-            </option>
+            <option key={r.id} value={r.id}>{r.name}</option>
           ))}
         </select>
 
         <div className="flex justify-end gap-3">
+          <button className="px-4 py-2 border rounded-lg" onClick={() => setShowAssignModal(false)}>Cancel</button>
           <button
-            className="px-4 py-2 border rounded"
-            onClick={() => setShowAssignModal(false)}
-          >
-            Cancel
-          </button>
-          <button
-            className="px-4 py-2 bg-green-600 text-white rounded"
+            className="px-4 py-2 bg-green-600 text-white rounded-lg"
             onClick={handleAssignConfirm}
             disabled={!selectedRecruiter}
           >
@@ -368,11 +317,11 @@ function AssignModal({
 /* ASSIGNED RECRUITERS TABLE */
 function AssignedRecruitersTable({ assignedList }) {
   return (
-    <div className="mt-8 bg-white p-4 rounded shadow">
-      <h3 className="text-xl font-bold mb-3">Assigned Recruiters</h3>
+    <div className="mt-8 bg-white p-4 rounded-lg shadow">
+      <h3 className="text-xl font-bold mb-3 text-blue-500">Assigned Recruiters</h3>
 
       <table className="min-w-full text-sm border">
-        <thead className="bg-gray-100">
+        <thead className="bg-blue-50 text-gray-700">
           <tr>
             <th className="border p-2">S.NO</th>
             <th className="border p-2">Recruiter</th>
@@ -381,22 +330,21 @@ function AssignedRecruitersTable({ assignedList }) {
             <th className="border p-2">Status</th>
           </tr>
         </thead>
-
         <tbody>
           {assignedList.length === 0 ? (
             <tr>
-              <td className="p-3 text-center text-gray-500" colSpan="5">
-                No assignments yet
-              </td>
+              <td className="p-3 text-center text-gray-500" colSpan="5">No assignments yet</td>
             </tr>
           ) : (
             assignedList.map((item, i) => (
               <tr key={item.id}>
                 <td className="border p-2">{i + 1}</td>
-                <td className="border p-2">{item.recruiter}</td>
+                <td className="border p-2 text-blue-500">{item.recruiter}</td>
                 <td className="border p-2">{item.requirementTitle}</td>
                 <td className="border p-2">{item.assignedDate}</td>
-                <td className="border p-2">{item.status}</td>
+                <td className="border p-2">
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs">{item.status}</span>
+                </td>
               </tr>
             ))
           )}

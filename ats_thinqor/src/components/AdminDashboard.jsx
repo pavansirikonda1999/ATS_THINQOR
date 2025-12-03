@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { getUsers, createUser, clearMessages } from "../auth/authSlice";
+import { useNavigate } from "react-router-dom";
 
 import {
   Users,
@@ -39,6 +40,9 @@ export default function AdminDashboard() {
     role: "RECRUITER",
     password: "",
   });
+  const [userSearch, setUserSearch] = useState("");
+
+  const navigate = useNavigate();
 
   /* Fetch Users */
   useEffect(() => {
@@ -75,16 +79,16 @@ export default function AdminDashboard() {
 
   const donutSegments = useMemo(() => {
     const total = usersList?.length || 0;
-    let cumulative = 0;
+    let cumulativePercent = 0;
 
     return roleData.map((r) => {
       const count = usersList?.filter((u) => u.role === r.key).length || 0;
       const percent = total > 0 ? count / total : 0;
 
-      const start = cumulative * 283; // circumference
+      const start = cumulativePercent * 283; // circumference
       const end = percent * 283;
 
-      cumulative += percent;
+      cumulativePercent += percent;
 
       return {
         ...r,
@@ -98,6 +102,17 @@ export default function AdminDashboard() {
 
   /* Recent Users */
   const recentUsers = useMemo(() => (usersList || []).slice(0, 5), [usersList]);
+
+  /* Filtered Users by Search */
+  const filteredUsers = useMemo(() => {
+    if (!userSearch) return recentUsers;
+    return recentUsers.filter(
+      (u) =>
+        u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
+        u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
+        (u.phone && u.phone.includes(userSearch))
+    );
+  }, [recentUsers, userSearch]);
 
   /* Create User Handler */
   const handleCreate = (e) => {
@@ -121,17 +136,18 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b py-6 px-8 flex items-center justify-between">
-        <div>
+        <div className="pl-32">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text">
             Admin Dashboard
           </h1>
-          <p className="text-gray-500">
-            Monitor your team and performance metrics.
-          </p>
+          <p className="text-gray-500">Monitor your team and performance metrics.</p>
         </div>
 
         <div className="flex gap-4">
-          <button className="border px-6 py-3 rounded-xl flex items-center gap-2">
+          <button
+            className="border px-6 py-3 rounded-xl flex items-center gap-2"
+            onClick={() => navigate("/reports")}
+          >
             <FileBarChart className="w-5 h-5" />
             Reports
           </button>
@@ -149,56 +165,25 @@ export default function AdminDashboard() {
         {/* Toasts */}
         {error && <div className="bg-red-200 p-3 rounded-xl mb-3">{error}</div>}
         {successMessage && (
-          <div className="bg-green-200 p-3 rounded-xl mb-3">
-            {successMessage}
-          </div>
+          <div className="bg-green-200 p-3 rounded-xl mb-3">{successMessage}</div>
         )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-          <KPICard
-            title="Total Users"
-            value={stats.total}
-            icon={Users}
-            gradient="bg-indigo-500"
-          />
-          <KPICard
-            title="Active Users"
-            value={stats.active}
-            icon={UserCheck}
-            gradient="bg-emerald-500"
-          />
-          <KPICard
-            title="Admins"
-            value={stats.admins}
-            icon={Shield}
-            gradient="bg-purple-500"
-          />
-          <KPICard
-            title="Recruiters"
-            value={stats.recruiters}
-            icon={Briefcase}
-            gradient="bg-blue-500"
-          />
+          <KPICard title="Total Users" value={stats.total} icon={Users} gradient="bg-indigo-500" />
+          <KPICard title="Active Users" value={stats.active} icon={UserCheck} gradient="bg-emerald-500" />
+          <KPICard title="Admins" value={stats.admins} icon={Shield} gradient="bg-purple-500" />
+          <KPICard title="Recruiters" value={stats.recruiters} icon={Briefcase} gradient="bg-blue-500" />
         </div>
 
-        {/* ===================== DONUT ROLE DISTRIBUTION ===================== */}
+        {/* Donut Role Distribution */}
         <div className="bg-white rounded-2xl shadow p-6 mb-10">
           <h2 className="text-xl font-semibold mb-6">Role Distribution</h2>
-
           <div className="flex items-center gap-10">
             {/* Donut Chart */}
             <div className="relative w-48 h-48">
               <svg width="100%" height="100%" viewBox="0 0 120 120">
-                <circle
-                  cx="60"
-                  cy="60"
-                  r="45"
-                  stroke="#eee"
-                  strokeWidth="14"
-                  fill="none"
-                />
-
+                <circle cx="60" cy="60" r="45" stroke="#eee" strokeWidth="14" fill="none" />
                 {donutSegments.map((seg, i) => (
                   <circle
                     key={i}
@@ -214,7 +199,6 @@ export default function AdminDashboard() {
                   />
                 ))}
               </svg>
-
               <div className="absolute inset-0 flex items-center justify-center flex-col">
                 <p className="text-3xl font-bold">{stats.total}</p>
                 <p className="text-gray-500 text-sm">Total Users</p>
@@ -224,20 +208,12 @@ export default function AdminDashboard() {
             {/* Legend */}
             <div className="grid grid-cols-2 gap-4">
               {donutSegments.map((seg) => (
-                <div
-                  key={seg.key}
-                  className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2"
-                >
+                <div key={seg.key} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2">
                   <div className="flex items-center gap-2">
-                    <span
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: seg.color }}
-                    ></span>
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: seg.color }}></span>
                     <div>
                       <p className="font-semibold">{seg.name}</p>
-                      <p className="text-gray-500 text-xs">
-                        {seg.count} users ({(seg.percent * 100).toFixed(1)}%)
-                      </p>
+                      <p className="text-gray-500 text-xs">{seg.count} users ({(seg.percent * 100).toFixed(1)}%)</p>
                     </div>
                   </div>
                   <span className="font-bold">{seg.count}</span>
@@ -247,14 +223,12 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* ===================== RECENT USERS (UPDATED) ===================== */}
+        {/* Recent Users */}
         <div className="bg-white rounded-2xl shadow p-6 mb-10">
           <div className="flex justify-between mb-4">
             <div>
               <h2 className="text-xl font-semibold">Recent Users</h2>
-              <p className="text-gray-500 text-sm">
-                Latest registered team members
-              </p>
+              <p className="text-gray-500 text-sm">Latest registered team members</p>
             </div>
 
             <div className="flex items-center border rounded-xl px-4 bg-gray-50">
@@ -262,6 +236,8 @@ export default function AdminDashboard() {
                 type="text"
                 placeholder="Search users..."
                 className="p-2 outline-none bg-transparent"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
               />
             </div>
           </div>
@@ -281,41 +257,24 @@ export default function AdminDashboard() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td
-                      colSpan={4}
-                      className="text-center p-4 text-gray-500"
-                    >
-                      Loading...
-                    </td>
+                    <td colSpan={5} className="text-center p-4 text-gray-500">Loading...</td>
                   </tr>
                 ) : (
-                  recentUsers.map((u) => (
-                    <tr
-                      key={u.id}
-                      className="border-b hover:bg-gray-50 transition"
-                    >
-                      {/* USER */}
+                  filteredUsers.map((u) => (
+                    <tr key={u.id} className="border-b hover:bg-gray-50 transition">
                       <td className="p-3 flex items-center gap-3">
                         <div
                           className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg"
-                          style={{
-                            background:
-                              "linear-gradient(135deg, #a855f7, #ec4899)",
-                          }}
+                          style={{ background: "linear-gradient(135deg, #a855f7, #ec4899)" }}
                         >
                           {u.name?.charAt(0)?.toUpperCase()}
                         </div>
-
                         <div>
                           <p className="font-semibold capitalize">{u.name}</p>
                           <p className="text-gray-500 text-sm">{u.email}</p>
                         </div>
                       </td>
-
-                      {/* CONTACT */}
                       <td className="p-3 text-gray-700">{u.phone}</td>
-
-                      {/* ROLE */}
                       <td className="p-3">
                         <span
                           className={`px-3 py-1 text-xs font-semibold rounded-full ${
@@ -331,8 +290,6 @@ export default function AdminDashboard() {
                           {u.role.replace("_", " ")}
                         </span>
                       </td>
-
-                      {/* STATUS */}
                       <td className="p-3">
                         <span
                           className={`px-3 py-1 text-xs rounded-full font-semibold ${
@@ -345,13 +302,7 @@ export default function AdminDashboard() {
                         </span>
                       </td>
                       <td className="p-3">
-                        <span
-                          className={`px-3 py-1 text-xs rounded-full font-semibold ${
-                            u.status === "ACTIVE"
-                            
-                            
-                          }`}
-                        >
+                        <span className="px-3 py-1 text-xs rounded-full font-semibold">
                           {u.created_at.split("T")[0]}
                         </span>
                       </td>
@@ -364,7 +315,7 @@ export default function AdminDashboard() {
         </div>
       </main>
 
-      {/* ===================== CREATE USER MODAL ===================== */}
+      {/* Create User Modal */}
       {openCreate && (
         <div className="fixed inset-0 bg-black/30 flex justify-center items-center">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-lg">
@@ -375,37 +326,26 @@ export default function AdminDashboard() {
                 className="border p-2 rounded-lg col-span-2"
                 placeholder="Full Name"
                 value={form.name}
-                onChange={(e) =>
-                  setForm({ ...form, name: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
                 required
               />
-
               <input
                 className="border p-2 rounded-lg col-span-2"
                 placeholder="Email"
                 value={form.email}
-                onChange={(e) =>
-                  setForm({ ...form, email: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
                 required
               />
-
               <input
                 className="border p-2 rounded-lg"
                 placeholder="Phone"
                 value={form.phone}
-                onChange={(e) =>
-                  setForm({ ...form, phone: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
               />
-
               <select
                 className="border p-2 rounded-lg"
                 value={form.role}
-                onChange={(e) =>
-                  setForm({ ...form, role: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
               >
                 <option value="ADMIN">Admin</option>
                 <option value="DELIVERY_MANAGER">Delivery Manager</option>
@@ -413,25 +353,17 @@ export default function AdminDashboard() {
                 <option value="RECRUITER">Recruiter</option>
                 <option value="CLIENT">Client</option>
               </select>
-
               <input
                 className="border p-2 rounded-lg col-span-2"
                 placeholder="Password"
                 type="password"
                 value={form.password}
-                onChange={(e) =>
-                  setForm({ ...form, password: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
                 required
               />
-
-              <button
-                type="submit"
-                className="bg-indigo-600 text-white px-4 py-2 rounded-xl"
-              >
+              <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-xl">
                 {loading ? "Creating…" : "Create"}
               </button>
-
               <button
                 type="button"
                 onClick={() => setOpenCreate(false)}
