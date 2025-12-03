@@ -13,7 +13,7 @@ import CandidateApplicationUI from "./components/Candidates";
 import FloatingAiChat from "./components/FloatingAiChat";
 import Users from "./components/users";
 import RecruiterDashboard from "./components/RecruiterDashboard";
-import InterviewsPage from "./components/interviews";
+import InterviewsPage from "./components/InterviewsPage";
 import CandidateList from "./components/CandidateList";
 import CandidateTracking from "./components/CandidateTracking";
 import Reports from "./components/Reports";
