@@ -1,13 +1,20 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { fetchRequirements, fetchClients } from "../auth/authSlice";
+import {
+  fetchRequirements,
+  fetchClients,
+  fetchRecruiters,
+  fetchAllocations,
+  assignRequirement,
+  deleteRequirement
+} from "../auth/authSlice";
 import { useNavigate } from "react-router-dom";
 
 export default function Requirements() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
-  const { user, requirements, clients, loading } = useSelector((state) => state.auth);
+  const { user, requirements, clients, recruiters, allocations, loading } = useSelector((state) => state.auth);
 
   const [selectedClient, setSelectedClient] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -15,58 +22,17 @@ export default function Requirements() {
   const [selectedReq, setSelectedReq] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
 
-  const [recruiters, setRecruiters] = useState([]);
-  const [assignedList, setAssignedList] = useState([]);
-
   useEffect(() => {
     dispatch(fetchRequirements());
     dispatch(fetchClients());
-    loadRecruiters();
+    dispatch(fetchRecruiters());
   }, [dispatch]);
 
   useEffect(() => {
-    if (requirements.length > 0) fetchAssignedRecruiters(requirements);
-    else setAssignedList([]);
-  }, [requirements]);
-
-  const loadRecruiters = async () => {
-    try {
-      const res = await fetch("http://localhost:5001/get-recruiters");
-      const data = await res.json();
-      setRecruiters(data);
-    } catch (err) {
-      console.error("Recruiter load error:", err);
+    if (requirements.length > 0) {
+      dispatch(fetchAllocations(requirements));
     }
-  };
-
-  const fetchAssignedRecruiters = async (reqList) => {
-    try {
-      const all = await Promise.all(
-        reqList.map(async (req) => {
-          const res = await fetch(
-            `http://localhost:5000/requirements/${req.id}/allocations`
-          );
-
-          if (!res.ok) return [];
-
-          const data = await res.json();
-
-          return data.map((item) => ({
-            id: item.id,
-            requirementId: req.id,
-            requirementTitle: req.title,
-            recruiter: item.recruiter_name,
-            assignedDate: item.created_at ? new Date(item.created_at).toLocaleString() : "-",
-            status: item.status || "Assigned",
-          }));
-        })
-      );
-
-      setAssignedList(all.flat());
-    } catch (error) {
-      console.error("Assigned recruiters error:", error);
-    }
-  };
+  }, [dispatch, requirements]);
 
   const canCreate = ["ADMIN", "DELIVERY_MANAGER"].includes(user?.role);
   const canAssign = ["ADMIN", "DELIVERY_MANAGER"].includes(user?.role);
@@ -75,40 +41,20 @@ export default function Requirements() {
     if (!selectedReq || !selectedRecruiter) return;
 
     try {
-      const res = await fetch("http://localhost:5001/assign-requirement", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requirement_id: selectedReq.id,
-          recruiter_id: parseInt(selectedRecruiter),
-          assigned_by: user.id,
-        }),
-      });
+      const resultAction = await dispatch(assignRequirement({
+        requirement_id: selectedReq.id,
+        recruiter_id: parseInt(selectedRecruiter),
+        assigned_by: user.id,
+      }));
 
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Failed to assign recruiter");
-        return;
+      if (assignRequirement.fulfilled.match(resultAction)) {
+        setShowAssignModal(false);
+        setSelectedRecruiter("");
+        setSelectedReq(null);
+        refreshAllData();
+      } else {
+        alert(resultAction.payload || "Failed to assign recruiter");
       }
-
-      const recruiterName = recruiters.find((r) => r.id === parseInt(selectedRecruiter))?.name || "Unknown";
-
-      setAssignedList((prev) => [
-        ...prev,
-        {
-          id: data.allocation_id,
-          requirementId: selectedReq.id,
-          requirementTitle: selectedReq.title,
-          recruiter: recruiterName,
-          assignedDate: new Date().toLocaleString(),
-          status: "ASSIGNED",
-        },
-      ]);
-
-      setShowAssignModal(false);
-      setSelectedRecruiter("");
-      setSelectedReq(null);
-      refreshAllData();
     } catch (err) {
       console.error("Assign error:", err);
       alert("Server error");
@@ -119,20 +65,12 @@ export default function Requirements() {
     if (!window.confirm(`Delete ${req.title}?`)) return;
 
     try {
-      const res = await fetch(
-        `http://localhost:5000/delete-requirement/${req.id}`,
-        { method: "DELETE" }
-      );
-
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Failed to delete");
-        return;
+      const resultAction = await dispatch(deleteRequirement(req.id));
+      if (deleteRequirement.fulfilled.match(resultAction)) {
+        refreshAllData();
+      } else {
+        alert(resultAction.payload || "Failed to delete");
       }
-
-      dispatch({ type: "auth/setRequirements", payload: requirements.filter((r) => r.id !== req.id) });
-      setAssignedList((prev) => prev.filter((item) => item.requirementId !== req.id));
-      refreshAllData();
     } catch (err) {
       console.error("Delete error:", err);
       alert("Server error");
@@ -143,11 +81,9 @@ export default function Requirements() {
     try {
       const action = await dispatch(fetchRequirements());
       if (fetchRequirements.fulfilled.match(action)) {
-        await fetchAssignedRecruiters(action.payload || []);
+        await dispatch(fetchAllocations(action.payload || []));
       } else if (requirements?.length) {
-        await fetchAssignedRecruiters(requirements);
-      } else {
-        setAssignedList([]);
+        await dispatch(fetchAllocations(requirements));
       }
     } catch (error) {
       console.error("Refresh error:", error);
@@ -163,11 +99,11 @@ export default function Requirements() {
       {/* HEADER */}
       <div>
         <div className="bg-blue-100 rounded-2xl shadow-sm p-6 mb-6">
-  <h2 className="text-3xl font-bold text-black">Requirements</h2>
-  <p className="text-gray-500 mt-2">
-    Manage and track all your recruitment requirements
-  </p>
-</div>
+          <h2 className="text-3xl font-bold text-black">Requirements</h2>
+          <p className="text-gray-500 mt-2">
+            Manage and track all your recruitment requirements
+          </p>
+        </div>
 
         {canCreate && (
           <button
@@ -276,7 +212,7 @@ export default function Requirements() {
       )}
 
       {/* ASSIGNED RECRUITERS TABLE */}
-      <AssignedRecruitersTable assignedList={assignedList} />
+      <AssignedRecruitersTable assignedList={allocations} />
     </div>
   );
 }

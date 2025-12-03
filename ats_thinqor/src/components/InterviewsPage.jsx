@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { FileText, Eye, Edit3, MessageSquare, X } from "lucide-react";
+import { useDispatch, useSelector } from "react-redux";
+import { fetchCandidateProgress } from "../auth/authSlice";
 
 // ==================================
 // STATUS COLORS + LABELS
@@ -25,8 +27,8 @@ function CandidateCard({ interview }) {
     .toUpperCase();
 
   const progressWidth = interview.current_stage
-  ? `${((interview.current_stage / 5) * 100).toFixed(0)}%`
-  : "20%";
+    ? `${((interview.current_stage / 5) * 100).toFixed(0)}%`
+    : "20%";
 
   return (
     <>
@@ -45,10 +47,9 @@ function CandidateCard({ interview }) {
 
               <div className="flex items-center gap-2 mt-1">
                 <span
-                  className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    STATUS_STYLES[interview.status] ||
+                  className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_STYLES[interview.status] ||
                     "bg-gray-100 text-gray-700"
-                  }`}
+                    }`}
                 >
                   {interview.status?.replace("_", " ")}
                 </span>
@@ -91,9 +92,8 @@ function CandidateCard({ interview }) {
             <p>
               <strong>Status:</strong>{" "}
               <span
-                className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  STATUS_STYLES[interview.status] || "bg-gray-100 text-gray-700"
-                }`}
+                className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_STYLES[interview.status] || "bg-gray-100 text-gray-700"
+                  }`}
               >
                 {interview.status?.replace("_", " ")}
               </span>
@@ -120,25 +120,17 @@ function CandidateCard({ interview }) {
 // MAIN PAGE
 // ==================================
 export default function InterviewsPage() {
+  const dispatch = useDispatch();
+  const { interviews, loading } = useSelector((state) => state.auth);
+
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
   const [sortOrder, setSortOrder] = useState("A-Z");
-  const [interviews, setInterviews] = useState([]);
 
   // Fetch Data
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetch("http://127.0.0.1:5001/api/candidate_progress");
-        const data = await res.json();
-        setInterviews(data);
-      } catch (err) {
-        console.error("Fetch error:", err);
-      }
-    };
-
-    fetchData();
-  }, []);
+    dispatch(fetchCandidateProgress());
+  }, [dispatch]);
 
   // Stats
   const total = interviews.length;
@@ -222,7 +214,9 @@ export default function InterviewsPage() {
 
       {/* ====================== CANDIDATE LIST ====================== */}
       <div className="mt-6">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <p className="text-center text-gray-500 mt-10 text-lg">Loading...</p>
+        ) : filtered.length === 0 ? (
           <p className="text-center text-gray-500 mt-10 text-lg">
             No interviews found.
           </p>

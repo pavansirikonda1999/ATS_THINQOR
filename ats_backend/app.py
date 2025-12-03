@@ -19,7 +19,7 @@ except ImportError:
 
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}}, supports_credentials=True)
 app.register_blueprint(reports_bp)
 
 # -------------------------------------
@@ -199,8 +199,10 @@ def initialize_database():
                     requirement_id VARCHAR(50),
                     stage_id BIGINT,
                     stage_name VARCHAR(255),
-                    status ENUM('PENDING','IN_PROGRESS','COMPLETED','REJECTED') DEFAULT 'PENDING',
+                    status ENUM('PENDING','IN_PROGRESS','COMPLETED','REJECTED','REVIEW_REQUIRED') DEFAULT 'PENDING',
                     decision ENUM('NONE','MOVE_NEXT','HOLD','REJECT') DEFAULT 'NONE',
+                    manual_decision ENUM('NONE','MOVE_NEXT','HOLD','REJECT') DEFAULT 'NONE',
+                    category VARCHAR(50),
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     UNIQUE KEY uniq_progress_stage (candidate_id, requirement_id, stage_id),
                     FOREIGN KEY (candidate_id) REFERENCES candidates(id),
@@ -237,6 +239,22 @@ def initialize_database():
                 except Exception as e:
                     print(f"   ❌ Error adding decision: {e}")
 
+            cursor.execute("SHOW COLUMNS FROM candidate_progress LIKE 'manual_decision'")
+            if not cursor.fetchone():
+                print("   -> Adding 'manual_decision' column...")
+                try:
+                    cursor.execute("ALTER TABLE candidate_progress ADD COLUMN manual_decision ENUM('NONE','MOVE_NEXT','HOLD','REJECT') DEFAULT 'NONE'")
+                except Exception as e:
+                    print(f"   ❌ Error adding manual_decision: {e}")
+
+            cursor.execute("SHOW COLUMNS FROM candidate_progress LIKE 'category'")
+            if not cursor.fetchone():
+                print("   -> Adding 'category' column...")
+                try:
+                    cursor.execute("ALTER TABLE candidate_progress ADD COLUMN category VARCHAR(50)")
+                except Exception as e:
+                    print(f"   ❌ Error adding category: {e}")
+
             # Fix Unique Key for candidate_progress
             print("   -> Checking unique key constraints...")
             try:
@@ -266,6 +284,19 @@ def initialize_database():
                 red_flags TEXT,
                 model_version VARCHAR(50),
                 status ENUM('PENDING','DONE','ERROR') DEFAULT 'PENDING',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+                FOREIGN KEY (requirement_id) REFERENCES requirements(id)
+            );
+        """)
+
+        # ---------------- ASSESSMENT QUEUE ----------------
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS assesment_queue (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                candidate_id INT NOT NULL,
+                requirement_id VARCHAR(64) NOT NULL,
+                status VARCHAR(32) DEFAULT 'PENDING',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (candidate_id) REFERENCES candidates(id),
                 FOREIGN KEY (requirement_id) REFERENCES requirements(id)
@@ -2022,7 +2053,7 @@ def get_candidate_progress():
         cursor = conn.cursor(dictionary=True)
 
         sql = """
-            SELECT cp.id, cp.candidate_id, cp.requirement_id, cp.current_stage,
+            SELECT cp.id, cp.candidate_id, cp.requirement_id, cp.stage_name,
                    cp.status, c.name AS candidate_name,
                    rs.stage_name
             FROM candidate_progress cp

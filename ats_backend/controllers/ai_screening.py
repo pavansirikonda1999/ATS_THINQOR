@@ -24,7 +24,7 @@ def screen_candidate():
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor(dictionary=True, buffered=True)
 
-        _ensure_screening_tables(cursor)
+        # Removed _ensure_screening_tables(cursor) as tables are handled in app.py
 
         cursor.execute("SELECT * FROM candidates WHERE id = %s", (candidate_id,))
         candidate = cursor.fetchone()
@@ -67,11 +67,14 @@ def screen_candidate():
         )
         conn.commit()
 
-        cursor.execute("""
-            INSERT INTO assesment_queue (candidate_id, requirement_id, status)
-            VALUES (%s, %s, 'PENDING')
-        """, (candidate_id, requirement["id"]))
-        conn.commit()
+        # Check if assesment_queue table exists before inserting
+        cursor.execute("SHOW TABLES LIKE 'assesment_queue'")
+        if cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO assesment_queue (candidate_id, requirement_id, status)
+                VALUES (%s, %s, 'PENDING')
+            """, (candidate_id, requirement["id"]))
+            conn.commit()
 
         try:
             requests.post(
@@ -124,7 +127,7 @@ def create_interview():
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor(dictionary=True, buffered=True)
 
-        _ensure_screening_tables(cursor)
+        # Removed _ensure_screening_tables(cursor)
 
         cursor.execute("""
             INSERT INTO interviews
@@ -173,7 +176,7 @@ def get_interviews():
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor(dictionary=True, buffered=True)
 
-        _ensure_screening_tables(cursor)
+        # Removed _ensure_screening_tables(cursor)
 
         cursor.execute("""
             SELECT
@@ -211,7 +214,7 @@ def update_stage():
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor(dictionary=True, buffered=True)
 
-        _ensure_screening_tables(cursor)
+        # Removed _ensure_screening_tables(cursor)
 
         cursor.execute(
             "UPDATE interviews SET stage=%s WHERE id=%s",
@@ -259,7 +262,7 @@ def recruiter_decision():
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor(dictionary=True, buffered=True)
 
-        _ensure_screening_tables(cursor)
+        # Removed _ensure_screening_tables(cursor)
 
         requirement = _resolve_requirement(cursor, requirement_ref)
         if not requirement:
@@ -272,14 +275,14 @@ def recruiter_decision():
         if decision == "REJECT":
             cursor.execute("""
                 UPDATE candidate_progress
-                SET status='REJECTED', manual_decision='REJECT', current_stage='Rejected'
+                SET status='REJECTED', manual_decision='REJECT', stage_name='Rejected'
                 WHERE candidate_id=%s AND requirement_id=%s
             """, (candidate_id, req_id))
 
         elif decision == "HOLD":
             cursor.execute("""
                 UPDATE candidate_progress
-                SET status='PENDING', manual_decision='HOLD', current_stage='On Hold'
+                SET status='PENDING', manual_decision='HOLD', stage_name='On Hold'
                 WHERE candidate_id=%s AND requirement_id=%s
             """, (candidate_id, req_id))
 
@@ -289,7 +292,7 @@ def recruiter_decision():
 
             cursor.execute("""
                 UPDATE candidate_progress
-                SET status='IN_PROGRESS', manual_decision='MOVE_NEXT', current_stage=%s
+                SET status='IN_PROGRESS', manual_decision='MOVE_NEXT', stage_name=%s
                 WHERE candidate_id=%s AND requirement_id=%s
             """, (next_stage, candidate_id, req_id))
 
@@ -336,7 +339,7 @@ def get_candidate_progress(candidate_id, req_ref):
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor(dictionary=True, buffered=True)
 
-        _ensure_screening_tables(cursor)
+        # Removed _ensure_screening_tables(cursor)
 
         cursor.execute("SELECT * FROM candidates WHERE id=%s", (candidate_id,))
         candidate = cursor.fetchone()
@@ -398,81 +401,16 @@ def get_candidate_progress(candidate_id, req_ref):
         return jsonify({"error": str(e)}), 500
 
 
-# --------------------- Helper functions & table creation ---------------------
-def _ensure_screening_tables(cursor):
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS candidate_screening (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            candidate_id INT NOT NULL,
-            requirement_id VARCHAR(64) NOT NULL,
-            ai_score FLOAT,
-            ai_rationale JSON,
-            recommend VARCHAR(32),
-            red_flags JSON,
-            model_version VARCHAR(50),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (candidate_id) REFERENCES candidates(id),
-            FOREIGN KEY (requirement_id) REFERENCES requirements(id)
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS assesment_queue (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            candidate_id INT NOT NULL,
-            requirement_id VARCHAR(64) NOT NULL,
-            status VARCHAR(32) DEFAULT 'PENDING',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (candidate_id) REFERENCES candidates(id),
-            FOREIGN KEY (requirement_id) REFERENCES requirements(id)
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS candidate_progress (
-            id BIGINT AUTO_INCREMENT PRIMARY KEY,
-            candidate_id INT NOT NULL,
-            requirement_id VARCHAR(64) NOT NULL,
-            category VARCHAR(50),
-            current_stage VARCHAR(50) DEFAULT 'Screening',
-            status ENUM('PENDING','REVIEW_REQUIRED','REJECTED','IN_PROGRESS','COMPLETED') DEFAULT 'PENDING',
-            manual_decision ENUM('NONE','MOVE_NEXT','HOLD','REJECT') DEFAULT 'NONE',
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY uniq_progress (candidate_id, requirement_id),
-            FOREIGN KEY (candidate_id) REFERENCES candidates(id),
-            FOREIGN KEY (requirement_id) REFERENCES requirements(id)
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS interviews (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            candidate_id INT NOT NULL,
-            requirement_id VARCHAR(64) NOT NULL,
-            category VARCHAR(50),
-            stage VARCHAR(100),
-            date DATE,
-            time TIME,
-            duration VARCHAR(50),
-            mode VARCHAR(50),
-            location VARCHAR(255),
-            interviewer VARCHAR(255),
-            notes TEXT,
-            status VARCHAR(50) DEFAULT 'Scheduled',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (candidate_id) REFERENCES candidates(id),
-            FOREIGN KEY (requirement_id) REFERENCES requirements(id)
-        )
-    """)
-
+# --------------------- Helper functions ---------------------
 
 def _touch_candidate_progress(cursor, candidate_id, requirement_id, category, stage, status="PENDING", decision="NONE"):
+    # Using stage_name instead of current_stage to match app.py schema
     cursor.execute("""
-        INSERT INTO candidate_progress (candidate_id, requirement_id, category, current_stage, status, manual_decision)
+        INSERT INTO candidate_progress (candidate_id, requirement_id, category, stage_name, status, manual_decision)
         VALUES (%s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             category=VALUES(category),
-            current_stage=VALUES(current_stage),
+            stage_name=VALUES(stage_name),
             status=VALUES(status),
             manual_decision=VALUES(manual_decision)
     """, (candidate_id, requirement_id, category or "IT", stage, status, decision or "NONE"))

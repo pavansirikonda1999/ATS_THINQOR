@@ -1,7 +1,17 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Upload } from "lucide-react";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  fetchCandidates,
+  fetchRequirements,
+  submitCandidate,
+  updateCandidate,
+  deleteCandidate,
+  screenCandidate,
+  fetchCandidateTracker,
+  updateStageStatus
+} from "../auth/authSlice";
 
 /**
  * Combined CandidateApplicationUI (split UI into components inside one file)
@@ -376,9 +386,10 @@ function TrackerModal({
    -------------------------- */
 
 export default function CandidateApplicationUI() {
+  const dispatch = useDispatch();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useSelector((state) => state.auth || {});
+  const { user, candidates, requirements, trackerData, screeningResult, loading } = useSelector((state) => state.auth || {});
 
   // -------------------------------
   // FORM STATES (original form)
@@ -401,9 +412,7 @@ export default function CandidateApplicationUI() {
   // -------------------------------
   // Candidate + Requirement states
   // -------------------------------
-  const [candidates, setCandidates] = useState([]);
-  const [requirementsOptions, setRequirementsOptions] = useState([]);
-  const [requirementsLoading, setRequirementsLoading] = useState(false);
+  // Using Redux state for candidates and requirements
 
   const recruiterIdFromQuery = searchParams.get("recruiterId");
   const createdByUserId = recruiterIdFromQuery
@@ -413,69 +422,28 @@ export default function CandidateApplicationUI() {
   // -------------------------------
   // SCREENING (AI) STATES
   // -------------------------------
-  const [screenCandidate, setScreenCandidate] = useState(null);
+  const [screenCandidateData, setScreenCandidateData] = useState(null);
   const [selectedRequirementId, setSelectedRequirementId] = useState("");
   const [requirementSearch, setRequirementSearch] = useState("");
   const [screenError, setScreenError] = useState("");
   const [showScreenModal, setShowScreenModal] = useState(false);
   const [screenLoading, setScreenLoading] = useState(false);
-  const [screeningResult, setScreeningResult] = useState(null);
+  const [localScreeningResult, setLocalScreeningResult] = useState(null);
 
   // -------------------------------
   // TRACKER STATES
   // -------------------------------
   const [trackerModalOpen, setTrackerModalOpen] = useState(false);
-  const [trackerData, setTrackerData] = useState([]);
   const [trackerLoading, setTrackerLoading] = useState(false);
-  const [trackCandidate, setTrackCandidate] = useState(null);
+  const [trackCandidateData, setTrackCandidateData] = useState(null);
 
   // -------------------------------
   // FETCH CANDIDATES + REQUIREMENTS
   // -------------------------------
-  const fetchCandidates = async () => {
-    try {
-      const params = new URLSearchParams();
-      if (user?.id) {
-        params.append("user_id", user.id);
-        params.append("user_role", user.role || "");
-      }
-      const res = await fetch(`http://localhost:5001/get-candidates?${params}`);
-      if (!res.ok) throw new Error("Failed fetching candidates");
-      const data = await res.json();
-      setCandidates(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Fetch candidates error:", err);
-      setCandidates([]);
-    }
-  };
-
-  const fetchRequirements = async () => {
-    setRequirementsLoading(true);
-    try {
-      let data = [];
-      if (user?.role === "RECRUITER" || user?.role === "recruiter") {
-        const res = await fetch(`http://localhost:5001/users/${user.id}/details`);
-        const userDetails = await res.json();
-        const assigned = userDetails.assigned_requirements || [];
-        data = assigned.map((r) => ({ ...r, id: r.requirement_id || r.id }));
-      } else {
-        const res = await fetch("http://localhost:5001/get-requirements");
-        data = await res.json();
-      }
-      setRequirementsOptions(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Failed to fetch requirements:", err);
-      setRequirementsOptions([]);
-    } finally {
-      setRequirementsLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchCandidates();
-    fetchRequirements();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+    dispatch(fetchCandidates());
+    dispatch(fetchRequirements());
+  }, [dispatch, user]);
 
   // -------------------------------
   // FORM HANDLERS (unchanged)
@@ -491,26 +459,23 @@ export default function CandidateApplicationUI() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const data = new FormData();
-    Object.entries(formData).forEach(([k, v]) => data.append(k, v ?? ""));
-    if (resume) data.append("resume", resume);
+    const data = { ...formData };
+    if (resume) data.resume = resume;
 
     if (!editCandidateId && createdByUserId) {
-      data.append("created_by", createdByUserId);
+      data.created_by = createdByUserId;
     }
 
-    const url = editCandidateId
-      ? `http://localhost:5001/update-candidate/${editCandidateId}`
-      : "http://localhost:5001/submit-candidate";
-
-    const method = editCandidateId ? "PUT" : "POST";
-
     try {
-      const res = await fetch(url, { method, body: data });
-      const result = await res.json();
+      let resultAction;
+      if (editCandidateId) {
+        resultAction = await dispatch(updateCandidate({ id: editCandidateId, candidateData: data }));
+      } else {
+        resultAction = await dispatch(submitCandidate(data));
+      }
 
-      if (res.ok) {
-        setMessage(result.message || "Success");
+      if (submitCandidate.fulfilled.match(resultAction) || updateCandidate.fulfilled.match(resultAction)) {
+        setMessage(resultAction.payload.message || "Success");
 
         // If returning from recruiter dashboard, auto redirect
         const fromState = window.history.state?.usr?.from;
@@ -519,10 +484,10 @@ export default function CandidateApplicationUI() {
         }
 
         // Refresh list + clear form
-        fetchCandidates();
+        dispatch(fetchCandidates());
         resetForm();
       } else {
-        setMessage(result.message || "Failed");
+        setMessage(resultAction.payload || "Failed");
       }
     } catch (err) {
       console.error(err);
@@ -553,16 +518,11 @@ export default function CandidateApplicationUI() {
     if (!window.confirm("Delete this candidate?")) return;
 
     try {
-      const res = await fetch(`http://localhost:5001/delete-candidate/${id}`, {
-        method: "DELETE",
-      });
-      const result = await res.json();
-
-      if (res.ok) {
-        setMessage(result.message || "Deleted");
-        fetchCandidates();
+      const resultAction = await dispatch(deleteCandidate(id));
+      if (deleteCandidate.fulfilled.match(resultAction)) {
+        setMessage(resultAction.payload.message || "Deleted");
       } else {
-        setMessage(result.message || "Delete failed");
+        setMessage(resultAction.payload || "Delete failed");
       }
     } catch (err) {
       console.error(err);
@@ -590,7 +550,7 @@ export default function CandidateApplicationUI() {
   // SCREENING HANDLERS
   // -------------------------------
   const openScreenModal = (candidate) => {
-    setScreenCandidate(candidate);
+    setScreenCandidateData(candidate);
     setSelectedRequirementId("");
     setRequirementSearch("");
     setScreenError("");
@@ -598,7 +558,7 @@ export default function CandidateApplicationUI() {
   };
 
   const handleScreenCandidate = async () => {
-    if (!screenCandidate || !selectedRequirementId) {
+    if (!screenCandidateData || !selectedRequirementId) {
       setScreenError("Please select a requirement to compare against.");
       return;
     }
@@ -607,21 +567,16 @@ export default function CandidateApplicationUI() {
     setScreenError("");
 
     try {
-      const response = await fetch("http://localhost:5001/api/screen-candidate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidate_id: screenCandidate.id,
-          requirement_id: selectedRequirementId,
-        }),
-      });
+      const resultAction = await dispatch(screenCandidate({
+        candidate_id: screenCandidateData.id,
+        requirement_id: selectedRequirementId,
+      }));
 
-      const data = await response.json();
-      if (!response.ok) {
-        setScreenError(data.error || "AI screening failed");
-      } else {
-        setScreeningResult(data.result || data);
+      if (screenCandidate.fulfilled.match(resultAction)) {
+        setLocalScreeningResult(resultAction.payload);
         setShowScreenModal(false);
+      } else {
+        setScreenError(resultAction.payload || "AI screening failed");
       }
     } catch (error) {
       console.error(error);
@@ -635,50 +590,34 @@ export default function CandidateApplicationUI() {
   // TRACKER HANDLERS
   // -------------------------------
   const handleTrack = async (candidate) => {
-    setTrackCandidate(candidate);
+    setTrackCandidateData(candidate);
     setTrackerLoading(true);
     setTrackerModalOpen(true);
     try {
-      const res = await fetch(`http://localhost:5001/api/candidate-tracker/${candidate.id}`);
-      const data = await res.json();
-      setTrackerData(Array.isArray(data) ? data : data ? [data] : []);
+      await dispatch(fetchCandidateTracker(candidate.id));
     } catch (err) {
       console.error(err);
       alert("Failed to load tracker data");
-      setTrackerData([]);
     } finally {
       setTrackerLoading(false);
     }
   };
 
-  const updateStageStatus = async (candidateId, requirementId, stageId, status, decision) => {
-    console.log("🔄 Updating stage status:", { candidateId, requirementId, stageId, status, decision });
-
+  const handleUpdateStageStatus = async (candidateId, requirementId, stageId, status, decision) => {
     try {
-      const res = await fetch("http://localhost:5001/api/update-stage-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidate_id: candidateId,
-          requirement_id: requirementId,
-          stage_id: stageId,
-          status,
-          decision,
-        }),
-      });
+      const resultAction = await dispatch(updateStageStatus({
+        candidate_id: candidateId,
+        requirement_id: requirementId,
+        stage_id: stageId,
+        status,
+        decision,
+      }));
 
-      const responseData = await res.json();
-      console.log("📥 Response:", responseData);
-
-      if (res.ok) {
+      if (updateStageStatus.fulfilled.match(resultAction)) {
         // Refresh data
-        const refreshRes = await fetch(`http://localhost:5001/api/candidate-tracker/${candidateId}`);
-        const data = await refreshRes.json();
-        setTrackerData(Array.isArray(data) ? data : data ? [data] : []);
-        console.log("✅ Tracker data refreshed");
+        await dispatch(fetchCandidateTracker(candidateId));
       } else {
-        console.error("❌ Update failed:", responseData);
-        alert(`Failed to update status: ${responseData.error || "Unknown error"}`);
+        alert(`Failed to update status: ${resultAction.payload || "Unknown error"}`);
       }
     } catch (err) {
       console.error("❌ Error updating status:", err);
@@ -690,13 +629,13 @@ export default function CandidateApplicationUI() {
   // Requirement filtering
   // -------------------------------
   const filteredRequirements = useMemo(() => {
-    if (!requirementSearch) return requirementsOptions || [];
-    return (requirementsOptions || []).filter((req) =>
+    if (!requirementSearch) return requirements || [];
+    return (requirements || []).filter((req) =>
       `${req.title} ${req.location} ${req.client_id || ""}`
         .toLowerCase()
         .includes(requirementSearch.toLowerCase())
     );
-  }, [requirementsOptions, requirementSearch]);
+  }, [requirements, requirementSearch]);
 
   // -------------------------------
   // UI render (stacked top → bottom)
@@ -745,10 +684,10 @@ export default function CandidateApplicationUI() {
       <ScreeningModal
         showScreenModal={showScreenModal}
         setShowScreenModal={setShowScreenModal}
-        screenCandidate={screenCandidate}
+        screenCandidate={screenCandidateData}
         requirementSearch={requirementSearch}
         setRequirementSearch={setRequirementSearch}
-        requirementsLoading={requirementsLoading}
+        requirementsLoading={loading}
         filteredRequirements={filteredRequirements}
         selectedRequirementId={selectedRequirementId}
         setSelectedRequirementId={setSelectedRequirementId}
@@ -757,15 +696,15 @@ export default function CandidateApplicationUI() {
         setScreenError={setScreenError}
       />
 
-      <ScreeningResultModal screeningResult={screeningResult} setScreeningResult={setScreeningResult} />
+      <ScreeningResultModal screeningResult={localScreeningResult} setScreeningResult={setLocalScreeningResult} />
 
       <TrackerModal
         trackerModalOpen={trackerModalOpen}
         setTrackerModalOpen={setTrackerModalOpen}
         trackerLoading={trackerLoading}
         trackerData={trackerData}
-        trackCandidate={trackCandidate}
-        updateStageStatus={updateStageStatus}
+        trackCandidate={trackCandidateData}
+        updateStageStatus={handleUpdateStageStatus}
       />
     </div>
   );
