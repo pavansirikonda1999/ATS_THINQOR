@@ -1,96 +1,336 @@
-import React, { useEffect } from "react";
+// src/components/DmDashboard.jsx
+
+import React, { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 
 export default function DmDashboard() {
-  const { user } = useSelector((state) => state.auth);
+  const { user } = useSelector((state) => state.auth || {});
   const navigate = useNavigate();
 
-  // ✅ Protect route
+  const [stats, setStats] = useState({});
+  const [recentRequirements, setRecentRequirements] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Redirect if unauthorized
   useEffect(() => {
-    if (!user) navigate("/");
-    if (user?.role !== "DELIVERY_MANAGER") navigate("/");
+    if (!user || user?.role !== "DELIVERY_MANAGER") navigate("/");
   }, [user, navigate]);
 
-  const stats = [
-    { label: "Total Requirements", value: 12 },
-    { label: "Open Requirements", value: 8 },
-    { label: "Closed Requirements", value: 4 },
-    { label: "Assigned to Recruiters", value: 6 },
-  ];
+  // Load data
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+
+        /* ------------------ FIXED STATS FETCH ------------------ */
+        const statsRes = await fetch("http://localhost:5001/dashboard-stats");
+        const rawStats = statsRes.ok ? await statsRes.json() : null;
+
+        const s = rawStats?.stats || rawStats?.data || {};
+
+        const normalizedStats = {
+          total: s.totalRequirements ?? 0,
+          open: s.openRequirements ?? 0,
+          closed: s.closedRequirements ?? 0,
+          assigned: s.assignedRequirements ?? 0,
+          urgent: s.urgent ?? 0,
+          closedGrowthPercent: s.closedGrowthPercent ?? 0,
+          pendingReview: s.pendingReview ?? 0,
+        };
+
+        setStats(normalizedStats);
+
+        /* ------------------ Recent Requirements ------------------ */
+        const reqRes = await fetch("http://localhost:5001/recent-requirements");
+        const rawReq = reqRes.ok ? await reqRes.json() : [];
+
+        setRecentRequirements(rawReq);
+      } catch (err) {
+        console.error("❗ Dashboard load error:", err);
+        setStats({});
+        setRecentRequirements([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, []);
 
   const actions = [
-    { label: "Create Requirement", onClick: () => navigate("/create-requirement") },
-    { label: "Requirement Allocation", onClick: () => navigate("/requirements") },
+    {
+      label: "Create Requirement",
+      desc: "Add a new job requirement",
+      icon: "plus",
+      onClick: () => navigate("/create-requirement"),
+    },
+    {
+      label: "Search Candidates",
+      desc: "Find matching profiles",
+      icon: "search",
+      onClick: () => navigate("/candidates"), // ensure this route exists
+    },
+    {
+      label: "Allocate Requirement",
+      desc: "Assign to recruiters",
+      icon: "assign",
+      onClick: () => navigate("/requirements"),
+    },
+    {
+      label: "Generate Report",
+      desc: "Export analytics",
+      icon: "report",
+      onClick: () => navigate("/reports"),
+    },
   ];
 
-  const recentRequirements = [
-    { id: 1, title: "Java Developer", status: "Open", date: "2025-01-05" },
-    { id: 2, title: "React Engineer", status: "Assigned", date: "2025-01-04" },
-    { id: 3, title: "Salesforce Admin", status: "Open", date: "2025-01-03" },
+  const accentMap = {
+    purple: "text-purple-600",
+    green: "text-green-600",
+    pink: "text-pink-600",
+    yellow: "text-yellow-700",
+  };
+
+  const statCards = [
+    {
+      title: "Total Requirements",
+      value: stats?.total ?? "-",
+      color: "#f4efff",
+      accent: "purple",
+      subtitle: "Updated Today",
+    },
+    {
+      title: "Open Requirements",
+      value: stats?.open ?? "-",
+      color: "#eaffef",
+      accent: "green",
+  
+    },
+    {
+      title: "Closed Requirements",
+      value: stats?.closed ?? "-",
+      color: "#fff3f8",
+      accent: "pink",
+  
+    },
+    {
+      title: "Assigned to Recruiters",
+      value: stats?.assigned ?? "-",
+      color: "#fff6e8",
+      accent: "yellow",
+    },
   ];
 
   return (
-    <div className="p-6">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Delivery Manager Dashboard</h2>
+    <div className="p-6 bg-gray-50 min-h-screen">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between mb-8">
+        <div>
+          <p className="text-indigo-500 text-sm">Good Afternoon</p>
+          <h1 className="text-4xl font-extrabold text-indigo-700 mt-1">
+            Hiring Manager Dashboard
+          </h1>
+          <p className="text-gray-500 mt-2">
+            Track requirements and manage operations efficiently.
+          </p>
+        </div>
 
-      {/* Stats Section */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {stats.map((s, index) => (
-          <div key={index} className="bg-white p-5 shadow rounded-xl">
-            <p className="text-gray-500 text-sm">{s.label}</p>
-            <h3 className="text-2xl font-bold text-indigo-600 mt-1">{s.value}</h3>
-          </div>
+        <div className="bg-white px-4 py-2 rounded-full shadow">
+          {new Date().toLocaleDateString(undefined, {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          })}
+        </div>
+      </div>
+
+      {/* Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+        {statCards.map((s, idx) => (
+          <StatCard
+            key={idx}
+            title={s.title}
+            value={s.value}
+            color={s.color}
+            subtitle={s.subtitle}
+            accentClass={accentMap[s.accent] || "text-gray-800"}
+          />
         ))}
       </div>
 
-      {/* Quick Actions */}
-      <div className="bg-white p-5 rounded-xl shadow mb-8">
-        <h3 className="text-lg font-semibold mb-3 text-gray-700">Quick Actions</h3>
-        <div className="flex gap-4 flex-wrap">
-          {actions.map((a, index) => (
-            <button
-              key={index}
-              onClick={a.onClick}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition"
-            >
-              {a.label}
-            </button>
-          ))}
+      {/* Main Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold">⚡ Quick Actions</h3>
+            <div className="text-sm text-gray-500">Shortcuts</div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {actions.map((a, i) => (
+              <button
+                key={i}
+                onClick={a.onClick}
+                className="flex items-center gap-4 p-4 bg-white border rounded-xl hover:bg-gray-50 shadow-sm"
+              >
+                <div className="w-12 h-12 bg-indigo-50 text-indigo-700 flex items-center justify-center rounded-lg">
+                  <Icon name={a.icon} className="w-5 h-5" />
+                </div>
+
+                <div className="text-left">
+                  <div className="font-semibold text-gray-800">{a.label}</div>
+                  <div className="text-sm text-gray-500">{a.desc}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl shadow flex items-center justify-center text-gray-400">
+          <span>Widgets</span>
         </div>
       </div>
 
       {/* Recent Requirements */}
-      <div className="bg-white p-5 rounded-xl shadow">
-        <h3 className="text-lg font-semibold mb-3 text-gray-700">Recent Requirements</h3>
+      <div className="bg-white p-6 rounded-2xl shadow mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <span>📄</span> Recent Requirements
+          </h3>
 
-        <table className="w-full text-left border mt-2">
-          <thead className="bg-gray-100 text-gray-700">
-            <tr>
-              <th className="p-2">Title</th>
-              <th className="p-2">Status</th>
-              <th className="p-2">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recentRequirements.map((req) => (
-              <tr key={req.id} className="border-b hover:bg-gray-50">
-                <td className="p-2">{req.title}</td>
-                <td className="p-2">
-                  <span className={`px-2 py-1 rounded text-sm ${
-                    req.status === "Open"
-                      ? "bg-green-100 text-green-700"
-                      : "bg-yellow-100 text-yellow-700"
-                  }`}>
-                    {req.status}
+          <button className="text-indigo-600 text-sm">View All</button>
+        </div>
+
+        {loading ? (
+          <>
+            <div className="h-14 bg-gray-100 rounded-lg animate-pulse"></div>
+            <div className="h-14 bg-gray-100 rounded-lg animate-pulse mt-3"></div>
+          </>
+        ) : recentRequirements.length === 0 ? (
+          <p className="text-gray-500">No recent requirements found.</p>
+        ) : (
+          <div className="space-y-3">
+            {recentRequirements.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition"
+              >
+                {/* Left */}
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-indigo-50 rounded-lg flex items-center justify-center">
+                    <svg
+                      className="w-5 h-5 text-indigo-600"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                    >
+                      <rect x="4" y="3" width="16" height="18" rx="2"></rect>
+                      <line x1="8" y1="7" x2="16" y2="7"></line>
+                      <line x1="8" y1="11" x2="16" y2="11"></line>
+                    </svg>
+                  </div>
+
+                  <span className="font-medium text-gray-800">{r.title}</span>
+                </div>
+
+                {/* Right */}
+                <div className="flex items-center gap-4">
+                  <span
+                    className={`px-3 py-1 rounded-full text-sm ${
+                      r.status === "Open"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-yellow-100 text-yellow-700"
+                    }`}
+                  >
+                    {r.status}
                   </span>
-                </td>
-                <td className="p-2">{req.date}</td>
-              </tr>
+
+                  <span className="text-gray-500 text-sm">
+                    {new Date(r.date).toLocaleString()}
+                  </span>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+/* -------------------- REUSABLE STAT CARD -------------------- */
+function StatCard({ title, value, color = "#fff", subtitle, accentClass }) {
+  return (
+    <div
+      className="p-6 rounded-2xl shadow-lg overflow-hidden"
+      style={{ background: `linear-gradient(135deg, ${color} 0%, #fff 60%)` }}
+    >
+      <p className="text-gray-600">{title}</p>
+      <h3 className={`text-4xl font-bold ${accentClass} mt-3`}>{value}</h3>
+      {subtitle && <p className="text-sm text-gray-500 mt-2">{subtitle}</p>}
+    </div>
+  );
+}
+
+/* -------------------- ICON COMPONENT -------------------- */
+const Icon = ({ name, className }) => {
+  if (name === "plus")
+    return (
+      <svg
+        className={className}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      >
+        <path d="M12 5v14M5 12h14" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+
+  if (name === "search")
+    return (
+      <svg
+        className={className}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      >
+        <circle cx="11" cy="11" r="6" />
+        <path d="M21 21l-4.35-4.35" />
+      </svg>
+    );
+
+  if (name === "assign")
+    return (
+      <svg
+        className={className}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      >
+        <circle cx="12" cy="8" r="4" />
+        <path d="M6 20v-1a4 4 0 014-4h4a4 4 0 014 4v1" />
+      </svg>
+    );
+
+  if (name === "report")
+    return (
+      <svg
+        className={className}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      >
+        <path d="M9 12h6M9 16h6M5 7h14" />
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+      </svg>
+    );
+
+  return <svg className={className} />;
+};
