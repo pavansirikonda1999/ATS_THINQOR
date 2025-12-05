@@ -1,13 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import {
-  fetchRequirements,
-  fetchClients,
-  fetchRecruiters,
-  fetchAllocations,
-  assignRequirement,
-  deleteRequirement
-} from "../auth/authSlice";
+import { fetchRequirements, fetchClients } from "../auth/authSlice";
 import { useNavigate } from "react-router-dom";
 
 export default function Requirements() {
@@ -34,15 +27,23 @@ export default function Requirements() {
   useEffect(() => {
     dispatch(fetchRequirements());
     dispatch(fetchClients());
-    dispatch(fetchRecruiters());
+    loadRecruiters();
   }, [dispatch]);
 
-useEffect(() => {
-  if (requirements && requirements.length > 0) {
-    dispatch(fetchAllocations(requirements));
-  }
-}, [requirements, dispatch]);
+  useEffect(() => {
+    if (requirements.length > 0) fetchAssignedRecruiters(requirements);
+    else setAssignedList([]);
+  }, [requirements]);
 
+  const loadRecruiters = async () => {
+    try {
+      const res = await fetch("http://localhost:5001/get-recruiters");
+      const data = await res.json();
+      setRecruiters(data);
+    } catch (err) {
+      console.error("Recruiter load error:", err);
+    }
+  };
 
   const fetchAssignedRecruiters = async (reqList) => {
     try {
@@ -82,19 +83,20 @@ useEffect(() => {
     if (!selectedReq || !selectedRecruiter) return;
 
     try {
-      const resultAction = await dispatch(assignRequirement({
-        requirement_id: selectedReq.id,
-        recruiter_id: parseInt(selectedRecruiter),
-        assigned_by: user.id,
-      }));
+      const res = await fetch("http://localhost:5001/assign-requirement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requirement_id: selectedReq.id,
+          recruiter_id: parseInt(selectedRecruiter),
+          assigned_by: user.id,
+        }),
+      });
 
-      if (assignRequirement.fulfilled.match(resultAction)) {
-        setShowAssignModal(false);
-        setSelectedRecruiter("");
-        setSelectedReq(null);
-        refreshAllData();
-      } else {
-        alert(resultAction.payload || "Failed to assign recruiter");
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to assign recruiter");
+        return;
       }
 
       const recruiterName =
