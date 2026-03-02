@@ -1,73 +1,61 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 # This module provides role-aware, plain-JSON data fetchers for the AI assistant.
-# It reuses the existing DB connection factory from the Flask app without altering models.
 
 import os
-import pymysql
-import pymysql.cursors
-from pymysql.err import Error
 from pathlib import Path
 
-# Load environment variables (same as app.py)
-try:
-	from dotenv import load_dotenv
-	env_file = Path(__file__).parent.parent / ".env"
-	if not env_file.exists():
-		env_file = Path(__file__).parent.parent / "config.env"
-	if env_file.exists():
-		load_dotenv(dotenv_path=env_file, override=True)
-except ImportError:
-	pass  # dotenv not available, use system env vars
+import pymysql
+import pymysql.cursors
 
+from utils.db import get_db_connection
 
-def get_db_connection():
-
-	try:
-		connection = pymysql.connect(
-			host=os.getenv('DB_HOST', 'localhost'),
-			user=os.getenv('DB_USER', 'root'),
-			password=os.getenv('DB_PASSWORD', ''),
-			database=os.getenv('DB_NAME', 'ats_system')
-		)
-		if connection.open:
-			return connection
-	except Error as e:
-		print("❌ AI service DB connection failed:", e)
-		return None
+# Removed local get_db_connection to use shared logic from utils.db
 
 
 UserDict = Dict[str, Any]
 
 
 def _fetch_one(query: str, params: Tuple[Any, ...]) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    if not conn:
+        return None
 
-	conn = get_db_connection()
-	if not conn:
-		return None
-	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
-	try:
-		cursor.execute(query, params)
-		row = cursor.fetchone()
-		return dict(row) if row else None
-	finally:
-		cursor.close()
-		conn.close()
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    try:
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _fetch_all(query: str, params: Tuple[Any, ...]) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    if not conn:
+        return []
 
-	conn = get_db_connection()
-	if not conn:
-		return []
-	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
-	try:
-		cursor.execute(query, params)
-		rows = cursor.fetchall()
-		return [dict(r) for r in rows] if rows else []
-	finally:
-		cursor.close()
-		conn.close()
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    try:
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows] if rows else []
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _is_admin(user: UserDict) -> bool:
@@ -146,9 +134,38 @@ def get_requirement_for_user(requirement_id: str, user: UserDict) -> Optional[Di
 	return None
 
 
-def get_interviews_for_user(candidate_id: str, user: UserDict) -> List[Dict[str, Any]]:
+def get_interviews_for_user(user: UserDict) -> List[Dict[str, Any]]:
+	"""Fetch interviews based on user role."""
+	if _is_admin(user) or (user or {}).get("role", "").upper() == "DELIVERY_MANAGER":
+		return _fetch_all("SELECT * FROM interviews ORDER BY date DESC, time DESC", ())
+	
+	if _is_recruiter(user):
+		# Recruiters see interviews for candidates they created or requirements they are assigned to
+		# This is a bit complex, simplifying to: access to interviews for requirements they are allocated to
+		return _fetch_all(
+			"""
+			SELECT i.* 
+			FROM interviews i
+			JOIN requirement_allocations ra ON ra.requirement_id = i.requirement_id
+			WHERE ra.recruiter_id = %s
+			ORDER BY i.date DESC, i.time DESC
+			""",
+			(user.get("id"),),
+		)
+	
+	if _is_client(user):
+		# Clients see interviews for their requirements
+		return _fetch_all(
+			"""
+			SELECT i.*
+			FROM interviews i
+			JOIN requirements r ON r.id = i.requirement_id
+			WHERE r.client_id = %s
+			ORDER BY i.date DESC, i.time DESC
+			""",
+			(user.get("client_id"),),
+		)
 
-	# Current schema has no interviews table; return empty safely
 	return []
 
 
@@ -550,7 +567,7 @@ def get_org_stats_snapshot() -> Dict[str, int]:
 	conn = get_db_connection()
 	if not conn:
 		return stats
-	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
+	cursor = conn.cursor(pymysql.cursors.DictCursor)
 	try:
 		cursor.execute("SELECT COUNT(*) AS total_requirements FROM requirements")
 		stats["total_requirements"] = cursor.fetchone().get("total_requirements", 0)
@@ -683,7 +700,7 @@ def get_tracking_stats_for_requirement(requirement_id: str, user: UserDict) -> D
 	if not conn:
 		return {}
 	
-	cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
+	cursor = conn.cursor(pymysql.cursors.DictCursor)
 	try:
 		# Get total candidates screened
 		cursor.execute(
@@ -740,3 +757,25 @@ def get_tracking_stats_for_requirement(requirement_id: str, user: UserDict) -> D
 		conn.close()
 
 
+def get_candidate_screening_for_user(user: UserDict, limit: int = 20) -> List[Dict[str, Any]]:
+	"""Fetch recent screening results."""
+	if not (_is_admin(user) or _is_recruiter(user) or (user or {}).get("role", "").upper() == "DELIVERY_MANAGER"):
+		return []
+
+	# Reviewers (recruiters/admins) can see screenings.
+	# Simplification: Recruiters see all screenings for now or could filter by req assignment
+	return _fetch_all(
+		"""
+		SELECT cs.*, c.name as candidate_name, r.title as requirement_title
+		FROM candidate_screening cs
+		JOIN candidates c ON c.id = cs.candidate_id
+		JOIN requirements r ON r.id = cs.requirement_id
+		ORDER BY cs.created_at DESC LIMIT %s
+		""",
+		(limit,)
+	)
+
+
+def get_interaction_logs_for_admin(limit: int = 10) -> List[Dict[str, Any]]:
+	"""Fetch recent chat logs for admin review."""
+	return _fetch_all("SELECT * FROM interaction_logs ORDER BY created_at DESC LIMIT %s", (limit,))

@@ -1,10 +1,11 @@
-// src/features/auth/authSlice.jsx
 // This slice manages authentication, users, requirements, clients, and candidates
 // All API calls should go through Redux thunks defined here, not direct fetch/axios calls
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import axios from "axios";
 
 const API_URL = "http://localhost:5001";
+
+
 
 // ------------------------------------------------------------------
 // LOGIN
@@ -16,12 +17,53 @@ export const loginUser = createAsyncThunk(
       const response = await axios.post(`${API_URL}/login`, credentials, {
         headers: { "Content-Type": "application/json" },
       });
-      localStorage.setItem("user", JSON.stringify(response.data.user));
-      return response.data.user;
+      console.log("LOGIN SUCCESS", response.data);
+      const user = response.data.user;
+
+      // Store user AND token
+      localStorage.setItem("user", JSON.stringify(user));
+      // Ideally store token separately or part of user object (it is in user object now)
+
+      return user;
     } catch (error) {
       return rejectWithValue(
         error.response?.data?.message || "Login failed. Please try again."
       );
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// VERIFY SESSION (New)
+// ------------------------------------------------------------------
+export const verifySession = createAsyncThunk(
+  "auth/verifySession",
+  async (_, { getState, rejectWithValue }) => {
+    try {
+      const state = getState();
+      let user = state.auth.user;
+
+      // If not in state, check local storage
+      if (!user) {
+        try {
+          user = JSON.parse(localStorage.getItem("user"));
+        } catch (e) { }
+      }
+
+      if (!user || !user.token) {
+        return rejectWithValue("No local session found");
+      }
+
+      const response = await axios.post(`${API_URL}/verify-session`, { token: user.token });
+
+      // Update local storage with fresh user data if needed
+      localStorage.setItem("user", JSON.stringify(response.data.user));
+      return response.data.user;
+
+    } catch (error) {
+      // If verification fails, clear local session
+      localStorage.removeItem("user");
+      return rejectWithValue("Session invalid/expired");
     }
   }
 );
@@ -71,7 +113,7 @@ export const getUsers = createAsyncThunk(
   "auth/getUsers",
   async (_, { rejectWithValue }) => {
     try {
-      const response = await axios.get(`${API_URL}/get-users`);
+      const response = await axios.get(`${API_URL}/users-list`); // Updated endpoint
       return response.data;
     } catch (error) {
       return rejectWithValue(
@@ -101,7 +143,18 @@ export const fetchRoles = createAsyncThunk(
 // ------------------------------------------------------------------
 // LOGOUT
 // ------------------------------------------------------------------
-export const logoutUser = createAsyncThunk("auth/logoutUser", async () => {
+export const logoutUser = createAsyncThunk("auth/logoutUser", async (_, { getState }) => {
+  const state = getState();
+  const user = state.auth.user;
+
+  if (user && user.token) {
+    try {
+      await axios.post(`${API_URL}/logout`, { token: user.token });
+    } catch (e) {
+      console.warn("Logout backend call failed", e);
+    }
+  }
+
   localStorage.removeItem("user");
   return null;
 });
@@ -420,11 +473,15 @@ export const addUser = createAsyncThunk(
 // UPDATE USER
 export const updateUser = createAsyncThunk(
   "auth/updateUser",
-  async ({ id, ...userData }, { rejectWithValue }) => {
+  async ({ id, ...userData }, { getState, rejectWithValue }) => {
     try {
-      const res = await axios.put(`${API_URL}/update-user/${id}`, userData, {
-        headers: { "Content-Type": "application/json" },
-      });
+      const state = getState();
+      const token = state.auth.user?.token;
+
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await axios.put(`${API_URL}/update-user/${id}`, userData, { headers });
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.message || "Failed to update user");
@@ -435,9 +492,18 @@ export const updateUser = createAsyncThunk(
 // DELETE USER
 export const deleteUser = createAsyncThunk(
   "auth/deleteUser",
-  async (id, { rejectWithValue }) => {
+  async (arg, { getState, rejectWithValue }) => {
     try {
-      const res = await axios.delete(`${API_URL}/delete-user/${id}`);
+      const state = getState();
+      const token = state.auth.user?.token;
+
+      // Arg might be id or object, just extract id
+      const id = typeof arg === "object" ? arg.id : arg;
+
+      const config = {};
+      if (token) config.headers = { Authorization: `Bearer ${token}` };
+
+      const res = await axios.delete(`${API_URL}/delete-user/${id}`, config);
       return { id, message: res.data.message };
     } catch (err) {
       return rejectWithValue(err.response?.data?.message || "Failed to delete user");
@@ -480,6 +546,18 @@ export const fetchReportStats = createAsyncThunk(
       return res.data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.error || "Failed to fetch report stats");
+    }
+  }
+);
+
+export const fetchReportStageCandidates = createAsyncThunk(
+  "reports/fetchStageCandidates",
+  async ({ reqId, stageName }, { rejectWithValue }) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/reports/requirement/${reqId}/stage/candidates?stage_name=${encodeURIComponent(stageName)}`);
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to fetch stage candidates");
     }
   }
 );
@@ -560,6 +638,20 @@ export const updateStageStatus = createAsyncThunk(
       return res.data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.error || "Failed to update stage status");
+    }
+  }
+);
+
+export const assignCandidateToRequirement = createAsyncThunk(
+  "candidates/assignCandidateToRequirement",
+  async ({ candidate_id, requirement_id }, { rejectWithValue }) => {
+    try {
+      const res = await axios.post(`${API_URL}/api/assign-candidate`, { candidate_id, requirement_id }, {
+        headers: { "Content-Type": "application/json" },
+      });
+      return res.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.error || "Failed to assign candidate");
     }
   }
 );
@@ -675,7 +767,16 @@ export const fetchUserDetails = createAsyncThunk(
 // INITIAL STATE
 // ------------------------------------------------------------------
 const initialState = {
-  user: JSON.parse(localStorage.getItem("user")) || null,
+  user: (() => {
+    try {
+      const u = localStorage.getItem("user");
+      return u && u !== "undefined" ? JSON.parse(u) : null;
+    } catch (e) {
+      console.error("Failed to parse user from localStorage:", e);
+      return null;
+    }
+  })(),
+  isVerifying: true, // New flag for initial session check
   usersList: [], // For admin getUsers
   requirements: [],
   clients: [],
@@ -768,6 +869,23 @@ const authSlice = createSlice({
         state.loading = false;
         state.error = action.payload;
       })
+
+      // VERIFY SESSION
+      .addCase(verifySession.pending, (state) => {
+        state.isVerifying = true;
+        state.loading = true; // Optional: keep loading true if you want spinner
+      })
+      .addCase(verifySession.fulfilled, (state, action) => {
+        state.isVerifying = false;
+        state.loading = false;
+        state.user = action.payload;
+      })
+      .addCase(verifySession.rejected, (state, action) => {
+        state.isVerifying = false;
+        state.loading = false;
+        state.user = null;
+      })
+
 
       // LOGOUT
       .addCase(logoutUser.fulfilled, (state) => {
